@@ -1,0 +1,15 @@
+import "./sha256" as sha256
+from "utils" import Dual, dual_limbs_to_dense_limbs, dense_limbs_to_dual_limbs, combine_limbs
+from "const" import IV_S
+from "padding" import check_padding
+
+
+// N: Number of invocations of sha256 blocks
+// M: Message length
+// NL: Number of limbs
+// output dense form of sha256(message)
+// def main<N, NL>(field[N][16][NL] padded_message, u32 M, field[N][16][NL] PAD, u32 LIMBWIDTH) -> field[8]:
+def main<N, NL>(field[N][16][NL] padded_message, u32 M, u32 LIMBWIDTH) -> field[8]:
+    // assert(check_padding::<N, NL>(padded_message, M, PAD, LIMBWIDTH))
+    assert(check_padding::<N, NL>(padded_message, M, LIMBWIDTH))
+    return sha256::<N, NL>(padded_message)

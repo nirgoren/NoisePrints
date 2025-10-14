@@ -1,0 +1,6 @@
+from "test_sha256_ori" import test_sha256
+
+const u32 N = 16
+
+def main(u32[8] expected_hash, private u32[N][16] padded_message) -> bool:
+    return test_sha256::<N>(expected_hash, padded_message)

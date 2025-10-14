@@ -1,0 +1,105 @@
+// check signature pk = R^z G^{-h/r} using right-field arithmetic w/o advanced range check nor composite statement
+from "../../zok_utils/big_nat" import BigNat, BigNatb, ModuloHelperConst, ModuloConst, BigNatModMultwores_v5, BigNatb_v2
+from "../struct/ecdsastruct" import ECPoint, ECPoint_v2, ECDSACertificate, ECDSASignature, ECDSASignatureb //, ECDSACertificate_proc, BasePowers_plain
+from "../verifyecdsa_dynamic_stride" import verify_signature_non_zero, to_ecpoint2
+// from "../../zok_utils/advanced/mod_arithmetic_adv_v2" import modmultiply_wo_check_res
+from "../../zok_utils/basic/mod_arithmetic" import modulo
+from "../../zok_utils/modulomultiply" import checkmultiply, addition
+
+from "../../zok_utils/range_check" import BigNat_to_BigNatb, assert_well_formed, adv_rangecheck, assert_well_formed_for_special_form, assert_well_formed_for_special_form_v2
+// from "../Fp-estimate/group_operation" import scalar_mult, is_on_curve, point_add_v2 // compute_R, check_for_u_hat,to_ecpoint_v2_Fp, 
+from "../Fp-estimate/group_operation" import is_on_curve, point_add_v2 // compute_R, check_for_u_hat,to_ecpoint_v2_Fp, 
+
+from "../struct/ecdsa_advstruct" import ECDSACertificate_init, ECDSASign_init, PointDouble_init, PointAdd_init, PointAdd_x_init, ECDSA_init, ScalarMult_init
+from "../../zok_utils/struct/adv_struct" import BigNatModMult_init, BigNat_init_quotient, BigNat_init, BigNatModMultadv, ModuloConstAdv, BigNatModMultwores_init
+from "../struct/ecdsaconst_advstruct" import VerifyECDSAConstAdv, PointAddConstAdv, VerifyECDSASigmaConst
+from "../../zok_utils/assert_well_formed" import is_equal, is_non_zero, BigNatb_to_BigNat, less_than_threshold_inner
+
+
+from "../advanced/verifyecdsa" import signature_init_to_signature
+from "../verify_ec_operations" import compute_base, combine_limbs
+import "hashes/poseidon/poseidon" as poseidon
+
+// from "struct/ecdsaFp_struct" import ECDSAFpSqSigma, ECDSACertFp_init, ECDSAFpSq_private, ECPoint_v2_Fp, ECPoint_Fp, PointAdd_x_Fp_init, IncompletePointAdd_Fp, ECDSACertFpNaive_init, ECDSAFpNaive_init_v2, ECDSACertFpNaive, ECDSASign_partinit, ECDSACertFpNaive_init_v2
+from "../Fp-estimate/struct/ecdsaFp_struct" import ECPoint_Fp, ECPoint_v2_Fp
+from "../Fp-estimate/struct/ecdsaFp_conststruct" import PointAddConstFp
+from "../../zok_utils/Fp/assert_well_formed" import group_bignat
+
+from "struct/ecdsa_struct" import ECDSACertNaive_Fp_init, ECDSACertNaive_Fp, PointAdd_x_Fp_init, ECDSANaive_Fp_init
+from "struct/ecdsa_struct" import ECDSACertNaive_Fp_init_v2
+// from "verifyecdsa_naive_v2" import signature_init_to_signature_v3
+from "struct/conststruct" import VerifyECDSAFpNaiveConst
+from "../../zok_utils/struct/naive_struct" import ModuloConstNaive
+from "../../zok_utils/basic/mod_arithmetic" import modmultiply_wo_check_res
+from "../../zok_utils/range_check" import bit_splitting
+
+from "../Fp/group_operation" import scalar_mult
+from "struct/ecdsa_struct" import ScalarMult
+
+
+
+def signature_range_check<NQ, W>(ECDSASignatureb<NQ, W> signatureb) -> ECDSASignature<NQ>:
+    // check that r and s are within limbwidth
+    BigNat<NQ> r = BigNatb_to_BigNat::<NQ, W>(signatureb.r)
+    BigNat<NQ> s = BigNatb_to_BigNat::<NQ, W>(signatureb.s)
+
+    return ECDSASignature {r: r, s: s}
+
+def compute_R<W, NQ, NP2, CRL>(field R_y, field carry_r, field r, BigNat<NQ> r_bignat, field Q_MODULUS, field P_MINUSQ_MINUS1) -> ECPoint_Fp:
+    assert(bit_splitting::<CRL>(carry_r))
+    // assert(CRL == 127) // for debug only
+    bool quotient_r = less_than_threshold_inner::<NQ, NP2>(r_bignat, r, carry_r, P_MINUSQ_MINUS1)
+    field R_x = if quotient_r then r + Q_MODULUS else r fi
+    ECPoint_Fp output = ECPoint_Fp {x: R_x, y: R_y}
+    return output
+
+def verify_operations<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(ECDSACertNaive_Fp<NQ> cert, BigNatb<NQ, W> z_exponent, ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> intermediate, VerifyECDSAFpNaiveConst<NQ, ZG, NG, AC> helper_const) -> bool:
+    field[4] fieldq_ele = group_bignat::<4, NQ, W>([cert.signature.r, cert.signature.s, helper_const.Q_MODULUS, intermediate.e]) // s <- z, e <- h/r
+    field q_field = fieldq_ele[2]
+    assert(fieldq_ele[0] != 0 && fieldq_ele[1] != 0 && fieldq_ele[0] != q_field && fieldq_ele[1] != q_field) // check that r, z != 0, q
+
+    // u32 BW2 = W % BW
+    ModuloConstNaive<ZG, NG, AC> modulo_const = helper_const.const_for_modq
+    u32 QW = modulo_const.quotient_bw
+    // compute e = H(m)/r mod q <=> check e * r == q*quotient + H(m)
+    assert(modmultiply_wo_check_res::<W, W2, CW, Qm1, NQ, NQ, NQ, Z, V, ZG, NG, LG, AC>(intermediate.e, cert.signature.r, intermediate.mm_for_e.z, helper_const.Q_MODULUS, cert.digest_result, intermediate.mm_for_e.v, intermediate.mm_for_e.quotientb, intermediate.mm_for_e.carry, modulo_const.gp_maxword, modulo_const.aux_const, modulo_const.CW_list))
+
+    // Compute pt_e = (G^{-1})^e
+    bool is_pt_e_empty = (fieldq_ele[3] == 0 || fieldq_ele[3] == q_field)
+    BigNatb<NQ, W> e_bignatb = BigNat_to_BigNatb::<NQ, W>(intermediate.e) // range check for e
+    // ECPoint_v2_Fp pt_e = scalar_mult::<W, NQ>(is_pt_e_empty, e_bignatb, helper_const.K_inv, helper_const.const_for_pa) // K_inv = inverse of generator of P256
+    ECPoint_v2_Fp pt_e = scalar_mult::<W, NQ>(is_pt_e_empty, e_bignatb, helper_const.K_inv, intermediate.mm_for_scalmul[0], helper_const.const_for_pa) // K_inv = inverse of generator of P256
+
+    // assert(pt_e.x == 60303333195796966923056287655976191576888331644484220520599712147592646088836) //  for debug only
+    // assert(pt_e.y == 76409370254435991714446967868980144573875844961362928145965728079126682140831) //  for debug only
+    // Compute R
+    ECPoint_Fp R = compute_R::<W, NQ, NP2, CRL>(intermediate.R_y, intermediate.partialadd.carry_r, fieldq_ele[0], cert.signature.r, q_field, helper_const.P_MINUSQ_MINUS1)
+    assert(is_on_curve(R, helper_const.const_for_pa)) // assert that R is not identity point and is on curve
+    // Compute pt_z = R^z
+    bool is_pt_z_empty = false // Since R is not identity point and z != 0, q, pt_z is not identity point
+    // ECPoint_v2_Fp pt_z = scalar_mult::<W, NQ>(is_pt_z_empty, z_exponent, R, helper_const.const_for_pa)
+    ECPoint_v2_Fp pt_z = scalar_mult::<W, NQ>(is_pt_z_empty, z_exponent, R, intermediate.mm_for_scalmul[1], helper_const.const_for_pa)
+    
+    // assert(pt_z.x == 23527444033532555161386201955098807038110827481875918405232105617720426341046) // for debug only
+    // assert(pt_z.y == 70987800358504891898614013118093192147114362403116341329648520234519156766671) // for debug only
+    // Compute pt_z + pt_e; Assume pt_z != +-pt_e
+    ECPoint_v2_Fp T = point_add_v2(pt_e, pt_z, intermediate.partialadd.m1, intermediate.partialadd.m2, helper_const.const_for_pa)
+    assert(!T.empty) // required
+    return T.x == cert.issuerkey.x && T.y == cert.issuerkey.y
+
+
+
+def verifyecdsa<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(ECDSACertNaive_Fp_init<NQ, W> cert, ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> intermediate, VerifyECDSAFpNaiveConst<NQ, ZG, NG, AC> helper_const) -> bool:
+    assert(W == 32)
+    ECDSASignature<NQ> signature = signature_range_check::<NQ,W>(cert.signatureb) // range check // + non-zero check for r, z; 
+    BigNat<NQ> digest_result = BigNatb_to_BigNat::<NQ, W>(cert.digest_resultb)
+    ECDSACertNaive_Fp<NQ> cert_proc = ECDSACertNaive_Fp{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result}
+    return verify_operations::<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(cert_proc, cert.signatureb.s, intermediate, helper_const)
+
+// to test
+def verifyecdsa_w_hash<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(ECDSACertNaive_Fp_init_v2<NQ, W> cert, ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> intermediate, VerifyECDSAFpNaiveConst<NQ, ZG, NG, AC> helper_const) -> bool:
+    assert(W == 32)
+    ECDSASignature<NQ> signature = signature_range_check::<NQ,W>(cert.signatureb) // range check // + non-zero check for r, z; 
+    // BigNat<NQ> digest_result = BigNatb_to_BigNat::<NQ, W>(cert.digest_resultb)
+    ECDSACertNaive_Fp<NQ> cert_proc = ECDSACertNaive_Fp{ signature: signature, issuerkey: cert.issuerkey, digest_result: cert.digest_result}
+    return verify_operations::<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(cert_proc, cert.signatureb.s, intermediate, helper_const)

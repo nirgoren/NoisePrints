@@ -1,0 +1,22 @@
+const u32 NLIMBS = 8
+const u32 LIMBWIDTH = 32
+const u32 W = LIMBWIDTH
+// const u32 W2_ = 1
+// const u32 W_PD_ = 4 // maximum number of bits in the last limb of quotient in point double
+const u32 LG = 6 // Number of limbs per group // calculate from zk_preprocessor.rs
+const u32 NG = 3 // number of groups // need test to verify if it is true or not // calculate from zk_preprocessor.rs
+// const u32 A_ = NLIMBS
+// const u32 NP = NLIMBS
+// const u32 NP2 = NLIMBS/2 // Number of limbes of P - Q
+const u32 NQ = NLIMBS
+// const u32 Pm1_ = NLIMBS-1 // number of limbs of carry for modulo operations
+const u32 V = NLIMBS * 2 // modify again
+const u32 Z = NLIMBS * 2 - 1 // modify
+const u32 ZG = NG - 1
+const u32 AC = NG + 1
+
+// const u32 CW2_ = 75 // used in scalar multiplication
+// const u32 CW3_ = 73
+// const u32 N_ = 20
+
+// const u32 P_SQU_ = 2*NP_

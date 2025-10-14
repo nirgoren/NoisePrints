@@ -1,0 +1,6 @@
+import "hashes/sha256/sha256" as sha256
+
+
+def test_sha256<N>(u32[8] expected_hash, u32[N][16] padded_message) -> bool:
+    assert(expected_hash == sha256::<N>(padded_message))
+    return true

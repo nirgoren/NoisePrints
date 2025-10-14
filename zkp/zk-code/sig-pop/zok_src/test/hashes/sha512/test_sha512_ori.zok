@@ -1,0 +1,7 @@
+import "hashes/sha512/sha512" as sha512
+
+const u32 MLEN = 1
+
+def main(u64[8] expected_hash, u64[MLEN][16] padded_message) -> bool:
+    assert(expected_hash == sha512::<MLEN>(padded_message))
+    return true

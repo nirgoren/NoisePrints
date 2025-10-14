@@ -1,0 +1,70 @@
+from "../../zok_utils/big_nat" import BigNat, BigNatb, ModuloHelperConst, ModuloConst
+from "../struct/ecdsastruct" import ECPoint, ECPoint_v2, ECDSACertificate, ECDSASignature, ECDSACertificate_proc, BasePowers_plain
+from "../verifyecdsa_dynamic_stride" import verify_signature_non_zero
+from "../../zok_utils/advanced/mod_arithmetic_adv_v2" import modmultiply_wo_check_res
+from "../../zok_utils/range_check" import BigNat_to_BigNatb, assert_well_formed
+from "group_operation" import scalar_mult_w_cached_window_method, scalar_mult, check_for_u_hat // from zok_src/ecdsa/advanced/group_operation.zok
+
+
+from "../struct/ecdsa_advstruct" import ECDSACertificate_init, ECDSASign_init, PointDouble_init, PointAdd_init, PointAdd_x_init, ECDSA_init, ScalarMult_init
+from "../../zok_utils/struct/adv_struct" import BigNatModMult_init, BigNat_init_quotient, BigNat_init, BigNatModMultadv, ModuloConstAdv
+from "../struct/ecdsaconst_advstruct" import VerifyECDSAConstAdv, ScalarMultConstAdv, PointAddConstAdv, PointDoubleConstAdv
+from "../../zok_utils/assert_well_formed" import is_equal
+
+// When limdwidth = 32, W = 10, W2 = 2
+def signature_init_to_signature<NQ, Lp1, W, W2>(ECDSASign_init<NQ, Lp1> signature_init) -> ECDSASignature<NQ>:
+    // assert(W == 10)
+    // assert(W2 == 2)
+    // check that r and s are within limbwidth
+    BigNat<NQ> r = assert_well_formed::<NQ, Lp1, W, W2>(signature_init.r)
+    BigNat<NQ> s = assert_well_formed::<NQ, Lp1, W, W2>(signature_init.s)
+    return ECDSASignature {r: r, s: s}
+
+
+// W: limbwidth
+// BW: subtable bitwidth
+// BW2: Limbwidth % subtable bitwidth
+// BWQ: Remaining number of bits for quotient
+// def verify_group_op<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS, TOTAL>(ECDSACertificate_proc<NP, NQ> cert, BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> intermediate, bool[TOTAL] list_a, VerifyECDSAConstPlain_ori<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+def verify_group_op<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSACertificate_proc<NP, NQ> cert, ECDSA_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> intermediate, VerifyECDSAConstAdv<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    u32 BW2 = W % BW
+    // compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+    // BigNat<NQ> a = BigNatb_to_BigNat::<NQ, W>(intermediate.a)
+    BigNat<NQ> a = assert_well_formed::<NQ, Lp1, BW, BW2>(intermediate.mm_for_a.res_init)
+    // division: compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+
+    ModuloConstAdv<ZG, NG, AC> modulo_const = helper_const.const_for_modq
+    u32 BWQ = modulo_const.quotient_bw
+    assert(modmultiply_wo_check_res::<BW, BW2, BWQ, NQ, NQ, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(a, cert.signature.s, intermediate.mm_for_a.z, helper_const.Q_MODULUS, cert.digest_result, intermediate.mm_for_a.v, intermediate.mm_for_a.quotient_init, intermediate.mm_for_a.carry_init, modulo_const.gp_maxword, modulo_const.aux_const))
+    // comptue b = r/s mod q <=> check b*s == q*quotient + r
+    // BigNat<NQ> b = BigNatb_to_BigNat::<NQ, W>(intermediate.b)
+    BigNat<NQ> b = assert_well_formed::<NQ, Lp1, BW, BW2>(intermediate.mm_for_b.res_init)
+    assert(modmultiply_wo_check_res::<BW, BW2, BWQ, NQ, NQ, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(b, cert.signature.s, intermediate.mm_for_b.z, helper_const.Q_MODULUS, cert.signature.r, intermediate.mm_for_b.v, intermediate.mm_for_b.quotient_init, intermediate.mm_for_b.carry_init, modulo_const.gp_maxword, modulo_const.aux_const))
+    
+    // u32 TOTAL = NP * W
+    // bool[TOTAL] list_a = bignat_to_bool_vec::<NQ, W, TOTAL>(a)
+    //// new generics: BW, BW2, Lp1, CL
+    bool is_a_equal_q = is_equal::<NQ, W>(a, helper_const.Q_MODULUS)
+    ECPoint_v2<NP> pt_a = scalar_mult_w_cached_window_method::<W, BW, NP, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC, WS, Nm1, S, LS, P_SQU, PA>(is_a_equal_q, a, helper_const.P256_G, helper_const.Gpow, intermediate.scalarmul_a, helper_const.const_for_scalmul.const_for_pa)    
+    BigNatb<NQ, W> b_bignatb = BigNat_to_BigNatb::<NQ, W>(b)
+    ECPoint_v2<NP> pt_b = scalar_mult::<W, BW, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC, P_SQU>(b_bignatb, cert.issuerkey, intermediate.scalarmul_b, helper_const.const_for_scalmul) 
+    // ECPoint_v2<NP> pt_b = scalar_mult::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, P_SQU, ZG, AC>(intermediate.b, cert.issuerkey, intermediate.scalarmul_b, helper_const.const_for_scalmul) 
+    
+    return check_for_u_hat::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU>(pt_a, pt_b, intermediate.mm_for_u_hat, cert.signature.r, helper_const.Q_MODULUS, helper_const.const_for_scalmul.const_for_pa, helper_const.P_MINUSQ_MINUS1)
+
+// W = limbwidth
+// BW = subtable bitwidth
+def verifyecdsa_32<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSACertificate_init<NP, NQ, Lp1> cert, ECDSA_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> intermediate, VerifyECDSAConstAdv<NP, NP2, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    u32 BW2 = W % BW // bitwidth for bitsplitting for W-bitwidth limbs
+    assert(W == BW*(Lp1-1) + BW2)
+    assert(W == 32)
+    ECDSASignature<NQ> signature = signature_init_to_signature::<NQ, Lp1, BW, BW2>(cert.signature_init)
+    // u32 LIMBWIDTH = W*(Lp1-1) + W2
+    // assert(LIMBWIDTH == 32)
+    assert(verify_signature_non_zero::<NQ>(signature))
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result = assert_well_formed::<NQ, Lp1, BW, BW2>(cert.digest_result_init)
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result}
+    // u32 TOTAL = NP*W
+    // bool[TOTAL] list_a = [...intermediate.a.limbs[7], ...intermediate.a.limbs[6], ...intermediate.a.limbs[5], ...intermediate.a.limbs[4], ...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(cert_proc, intermediate, helper_const)

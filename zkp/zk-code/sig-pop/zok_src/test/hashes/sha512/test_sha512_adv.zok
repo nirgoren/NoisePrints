@@ -1,0 +1,10 @@
+import "../../../hash/sha512/sha512" as sha512
+from "../../../hash/sha512/sha512" import NL
+
+const u32 N = 16
+// message len in bytes
+const u32 LEN = 2000
+def main(field[8] expected_hash, field[N][16][NL] padded_message) -> bool:
+    field[8] actual_hash = sha512::<N,LEN>(padded_message)
+    assert(expected_hash == actual_hash)
+    return true

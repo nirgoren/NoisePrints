@@ -1,0 +1,127 @@
+import "utils/pack/bool/unpack" as unpack
+import "utils/pack/bool/pack" as pack
+from "EMBED" import value_in_array, reverse_lookup, FIELD_MODULUS
+from "./const/range_check_tables" import D_1, D_2, D_3, D_4, D_5, D_6, D_7, D_8, D_9, D_10, D_11, D_12, D_13, D_14, D_15, D_16
+from "./util" import ceildiv, u32_sum
+
+def range_check_table<N>() -> field[2f**N]:
+    assert(1 <= N && N <= 16)
+    return if (N == 1)   then D_1   \
+      else if (N == 2)   then D_2   \
+      else if (N == 3)   then D_3   \
+      else if (N == 4)   then D_4   \
+      else if (N == 5)   then D_5   \
+      else if (N == 6)   then D_6   \
+      else if (N == 7)   then D_7   \
+      else if (N == 8)   then D_8   \
+      else if (N == 9)   then D_9   \
+      else if (N == 10)  then D_10  \
+      else if (N == 11)  then D_11  \
+      else if (N == 12)  then D_12  \
+      else if (N == 13)  then D_13  \
+      else if (N == 14)  then D_14  \
+      else if (N == 15)  then D_15  \
+      else                    D_16  \
+      fi fi fi fi fi fi fi fi fi fi \
+      fi fi fi fi fi
+
+// Check that x has N bits
+def fits_in_bits<N>(field x) -> bool:
+    //assert(pack::<N>(unpack::<N>(x)) == x)
+    assert(value_in_array(x, range_check_table::<N>()))
+    return true
+
+
+
+
+def combine_limbs<N>(field[N] input, u32[N] LIMBWIDTH) -> field:
+    field output = 0
+    u32 CUR_WIDTH = 0
+    for u32 i in 0..N do
+        u32 W = LIMBWIDTH[i]
+        output = output + input[i] * (2 ** CUR_WIDTH)
+        CUR_WIDTH = CUR_WIDTH + LIMBWIDTH[i]
+    endfor
+    return output
+
+
+def unsafe_split_limbs<N>(field x, u32[N] LIMBWIDTH) -> field[N]:
+    u32 TOTAL_WIDTH = u32_sum(LIMBWIDTH)
+    bool[TOTAL_WIDTH] bits = unpack(x)
+    field[N] output = [0; N]
+    u32 idx = TOTAL_WIDTH-1
+    for u32 i in 0..N do
+        for u32 j in 0..LIMBWIDTH[i] do
+            output[i] = output[i] + 2 ** j * (if bits[idx] then 1 else 0 fi)
+            idx = idx - 1
+        endfor
+    endfor
+    return output
+
+
+def check_limbs<N>(field[N] limbs, u32[N] LIMBWIDTH) -> bool:
+    for u32 i in 0..N do
+        u32 LW = LIMBWIDTH[i]
+        assert(fits_in_bits::<LW>(limbs[i]))
+    endfor
+    return true
+
+
+def split_limbs<N>(field x, u32[N] LIMBWIDTH) -> field[N]:
+    unsafe witness field[N] limbs = unsafe_split_limbs::<N>(x, LIMBWIDTH)
+    assert(check_limbs::<N>(limbs, LIMBWIDTH))
+    assert(combine_limbs::<N>(limbs, LIMBWIDTH) == x)
+    return limbs
+
+    
+
+// roughly checks that x < 2**SIZE using a table of size WORDSIZE
+// in reality if WORDSIZE doesnt divide size, the bound is a little different than this,
+// and so this function returns the actual bound that was checked
+def range_check_pow2_bound_inner<WORDSIZE>(field x, u32 size) -> integer:
+    assert(size != 0)
+    u32 WORDS = ceildiv(size, WORDSIZE)
+    u32 LEFTOVER = size % WORDSIZE
+    // just a heuristic
+    u32 LAST_LIMB = if LEFTOVER > 0 && LEFTOVER < 12 then LEFTOVER else WORDSIZE fi
+
+    u32[WORDS] limbs = [...[WORDSIZE; WORDS-1], LAST_LIMB]
+    field[WORDS] discarded = split_limbs(x, limbs)
+    integer bound = 2**(u32_sum(limbs)) - 1
+    // This can happen even if SIZE seems normal, because of the slack induced by table size
+    assert(bound < FIELD_MODULUS, "value seems to big to range check")
+    return bound
+
+
+def range_check_pow2_bound<SIZE,WORDSIZE>(field x) -> integer:
+    integer ret = if SIZE == 0 then 0 else range_check_pow2_bound_inner::<WORDSIZE>(x, SIZE) fi
+    assert(SIZE != 0 || x == 0)
+    return ret
+
+// check that x < 2**SIZE using a lookup table of size 2**WORDSIZE
+//def range_check_pow2_bound<SIZE,WORDSIZE>(field x) -> integer:
+//    u32 WORDS = ceildiv(SIZE,WORDSIZE)
+//    field[WORDS] discarded = split_limbs(x, [WORDSIZE; WORDS])
+//    return 2**(WORDS*WORDSIZE)
+    
+
+// likw range_check_pow2
+def range_check_pow2<SIZE,WORDSIZE>(field x) -> bool:
+//    u32 WORDS = ceildiv(SIZE,WORDSIZE)
+    //field[WORDS] discarded = split_limbs(x, [WORDSIZE; WORDS])
+    integer discarded = range_check_pow2_bound::<SIZE,WORDSIZE>(x)
+    return true
+//
+
+// REQUIRES: range_max - range_min < 2**SIZE
+// check that range_min <= x <= range_max
+def range_check<SIZE, WORDSIZE>(field x, field range_min, field range_max) -> bool:
+    assert(range_check_pow2::<SIZE, WORDSIZE>(x - range_min))
+    assert(range_check_pow2::<SIZE,WORDSIZE>(range_max - x))
+    return true
+
+
+// Could refactor these to allow them not to be assert-only, but those versions would be more constraints
+def leq<SIZE,WORDSIZE>(field x, field y) -> bool:
+    assert(range_check_pow2::<SIZE,WORDSIZE>(y - x))
+    return true

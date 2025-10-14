@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+
+import fileinput
+import re
+
+KEEP = re.compile("^·*(Start|End):")
+START_NAME = re.compile(r"Start: *([^.]*)")
+END_TIME = re.compile(r"End: *([^.]*)[.]*[.]+([0-9]+(?:[.][0-9]+)?.?s)$")
+
+
+def escape_name(s: str) -> str:
+    return s.strip().replace(" ", "_").replace(";", "")
+
+
+stack = []
+desc_sum = []
+
+for line in fileinput.input():
+    if KEEP.match(line):
+        start = START_NAME.search(line)
+        if start is not None:
+            name = escape_name(start.group(1))
+            stack.append(name)
+            desc_sum.append(0)
+        else:
+            end = END_TIME.search(line)
+            if end is not None:
+                name = escape_name(end.group(1))
+                assert stack[-1] == name
+                time = end.group(2)
+                if "ns" in time:
+                    x = 10 ** 0
+                elif "µs" in time:
+                    x = 10 ** 3
+                elif "ms" in time:
+                    x = 10 ** 6
+                elif "s" in time:
+                    x = 10 ** 9
+                else:
+                    assert False
+                time_num = float(time.strip("nµsm"))
+                time_val = int(x * time_num)
+                dsum = desc_sum.pop()
+                print(";".join(stack), max(time_val - dsum, 0))
+                stack.pop()
+                if len(desc_sum) > 0:
+                    desc_sum[-1] += time_val

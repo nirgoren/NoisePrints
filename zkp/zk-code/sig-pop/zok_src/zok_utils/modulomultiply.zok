@@ -1,0 +1,83 @@
+from "EMBED" import u32_to_field
+from "big_nat" import BigNatb, BigNatb_v2, BigNat, BigNatParams, BigNatModMult, GpBigNats
+from "assert_well_formed" import BigNatb_to_BigNat, BigNatb_to_BigNat_v2, assert_well_formed, bool_to_field
+import "utils/pack/bool/unpack" as unpack
+
+const BigNat<17> MODULUS = BigNat {limbs: [831573383607870309897848159567186333, 30407573650260313118683934144087547, 591092424599175245409683737382177655, 166561636615535985566620600292470281, 946002306187309697339799458744211816, 1603404434867557141253902232248910855, 2440718770260137425914868845419573866, 1306275745604830076021431225358467038, 780185054387741849573635861737482493, 1012145527633018112015334623701700848, 1583266521338719623369204066732616976, 1197299469500576527578648981800204983, 1738232037311393826991606831833482459, 117860027836517473874510957775805899, 745305650785097083330124206616226793, 1410397469567756235030048330047279796, 4980034677881030331682869174370156]}
+// N: Number of limbs of original numbers
+// NG: Number of limbs after grouping
+def group_limbs<N, NW, NG>(BigNat<N> left, BigNat<N> right) -> GpBigNats<NG>: // assume left and right have the same limbwidth
+    u32 limbs_per_group = (N-1)/NG + 1 // number of limbs for each group; should equal ceil(N/NG)
+    // assert(limbs_per_group == 6)
+    field[NG] group_left = [0; NG]
+    field[NG] group_right = [0; NG]
+    field[limbs_per_group] accumlated = [1; limbs_per_group]
+    field shift = 4294967296 // u32_to_field(1<<NW)
+    // field shift = u32_to_field(1<<(NW-1))*2 // does not reduce the r1cs size
+    
+    // u32 limb_width = NW * limbs_per_group // limbwidth for each group
+
+    // calculate [shift^0, shift^1, ..., shift^(limbs_per_group-1)]
+    for u32 j in 1..limbs_per_group do
+        accumlated[j] = accumlated[j-1]*shift
+    endfor
+
+    // calculate the first NG - 1 limbs of group_left and group_right
+    u32 NGm1 = NG - 1 
+    for u32 i in 0..NGm1 do
+        u32 step = i*limbs_per_group
+        for u32 j in 0..limbs_per_group do
+            group_left[i] = group_left[i] + left.limbs[step] * accumlated[j]
+            group_right[i] = group_right[i] + right.limbs[step] * accumlated[j]
+            step = step + 1
+        endfor
+    endfor
+    u32 step = NGm1 * limbs_per_group
+    u32 remain_limbs_per_gp = N - step
+    for u32 j in 0..remain_limbs_per_gp do
+        group_left[NGm1] = group_left[NGm1] + left.limbs[step] * accumlated[j]
+        group_right[NGm1] = group_right[NGm1] + right.limbs[step] * accumlated[j]
+        step = step + 1
+    endfor
+    
+    GpBigNats<NG> gpres = GpBigNats {left: BigNat {limbs: group_left}, right: BigNat {limbs: group_right}}
+    return gpres
+
+def checkmultiply<A, B, Z>(BigNat<A> a, BigNat<B> b, BigNat<Z> z) -> bool:
+    // assert(a.limbs[0]*b.limbs[0] == z.limbs[0]) // try to optimize but the number of contraints remain the same
+    // field Z_f = u32_to_field(Z)
+    // for field x in 1..Z_f do
+    field Z_f = u32_to_field(Z)
+    for field x in 0..Z_f do
+        field lefta = 0
+        field leftb = 0
+        field accumlated_x = 1
+        for u32 j in 0..A do
+            lefta = lefta + a.limbs[j]*accumlated_x
+            accumlated_x = accumlated_x*x
+        endfor
+        accumlated_x = 1
+        for u32 j in 0..B do
+            leftb = leftb + b.limbs[j]*accumlated_x
+            accumlated_x = accumlated_x*x
+        endfor
+        field left = lefta * leftb
+        field right = 0
+        accumlated_x = 1
+        for u32 j in 0..Z do
+            right = right + z.limbs[j]*accumlated_x
+            accumlated_x = accumlated_x*x
+        endfor
+        assert(left == right)
+    endfor
+    return true
+
+def addition<A, B>(BigNat<A> a, BigNat<B> b) -> BigNat<A>: //assume A >= B
+    field[A] limbs = a.limbs
+    for u32 i in 0..B do
+        limbs[i] = limbs[i] + b.limbs[i]
+    endfor
+    // BigNat<A> c = BigNat {limbs: limbs, bparams: a.bparams}
+    BigNat<A> c = BigNat {limbs: limbs}
+    return c
+

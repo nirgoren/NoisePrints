@@ -1,0 +1,96 @@
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, bits_to_bignat, bignat_to_bits, range_check_bignat, BigNatParams, new_bignat, UncheckedBigNat, integer_to_bignat
+from "../../../zok_utils/unsafe_witness/big_nat/mod_arithmetic" import modulo_reduce
+from "../../../zok_utils/unsafe_witness/range_check" import split_limbs, combine_limbs
+from "./group_operations" import is_on_curve, scalar_multG, scalar_mult, point_add, MODULUS, Q_SIZE, Q, generator
+from "./struct" import Point, UncheckedPoint, point_equal
+import "../../../hash/sha512/sha512"
+from "../../../hash/sha512/sha512" import NL,LIMBWIDTH
+import "utils/casts/u32_to_field"
+import "utils/casts/u64_to_field"
+import "utils/casts/field_to_u64"
+from "./struct" import integers_to_point, point_to_integers
+
+import "hashes/sha512/sha512" as sha512_naive_inner
+
+def sha512_naive<M>(field[M][16][NL] m) -> field[8]:
+    u64[M][16] sha512_input = [[0; 16]; M]
+    for u32 i in 0..M do
+        for u32 j in 0..16 do
+            sha512_input[i][j] = field_to_u64(combine_limbs(m[i][j], LIMBWIDTH))
+        endfor
+    endfor
+    u64[8] output = sha512_naive_inner(sha512_input)
+    field[8] real_output = [0; 8]
+    for u32 i in 0..8 do
+        real_output[i] = u64_to_field(output[i])
+    endfor
+    return real_output
+
+
+def verify_encode_point<P,LW,WORDSIZE>(bool[256] encoded, bool[255] x_bin) -> Point<P>:
+    assert(P * LW >= 255)
+    assert(encoded[255] == x_bin[0])
+    Point<P> p =  Point { 
+        x: range_check_bignat::<P,WORDSIZE>(bits_to_bignat::<255,P,LW>(x_bin)),
+        y: range_check_bignat::<P,WORDSIZE>(bits_to_bignat::<255,P,LW>(encoded[..255]))
+    }
+    assert(is_on_curve::<P,WORDSIZE>(p))
+    return p
+    
+
+def change_endianness<N>(bool[N] input) -> bool[N]:
+    bool[N] output = [false; N]
+    u32 WS = N / 64
+    for u32 i in 0..WS do
+        for u32 j in 0..8 do
+            for u32 k in 0..8 do
+                output[64 * i + 8 *j + k] = input[64 * i + 8 * (8-1-j) + k]
+            endfor
+        endfor
+    endfor
+    return output
+
+    
+def verify_ed25519<P,STRIDE,WORDSIZE>(Point<P> r, Point<P> a, bool[Q_SIZE] s, bool[Q_SIZE] h) -> bool:
+    u32 LW = r.x.params.limbwidth
+    Point<P> p = scalar_multG::<Q_SIZE,P,LW,STRIDE,WORDSIZE>(s)
+    //Point<P> p = scalar_mult::<Q_SIZE,P,WORDSIZE>(s, generator::<P,LW>())
+    Point<P> q = point_add::<P,WORDSIZE>(r, scalar_mult::<Q_SIZE,P,WORDSIZE>(h, a))
+    assert(is_on_curve::<P,WORDSIZE>(p))
+    assert(point_equal::<P>(p,q))
+    return true
+
+const u32 P_ = 5
+const u32 LW_ = 60
+const u32 STRIDE_ = 6
+const u32 WORDSIZE_ = 15
+
+const u32 M_LEN_ = 128
+const u32 M_ = 2
+
+
+//from "./const_input" import encoded_r, r_x, pk, a_u, s, m_const, h
+//def main() -> bool:
+def main(private bool[256] encoded_r, private bool[255] r_x, bool[256] pk, UncheckedPoint<P_> a_u, private bool[Q_SIZE] s, private field[M_][16][NL] m) -> bool:
+    Point<P_> r = verify_encode_point::<P_,LW_,WORDSIZE_>(encoded_r, r_x)
+    Point<P_> a = Point {
+        x: new_bignat::<P_>(a_u.x.limbs, LW_),
+        y: new_bignat::<P_>(a_u.y.limbs, LW_)
+    }
+    //field[M_][16][NL] m = m_const
+    field[8] to_concat = bits_to_bignat::<512,8,64>(change_endianness::<512>([...encoded_r, ...pk])).limbs
+    for field i in 0..8 do
+        field[NL] limbs = split_limbs(to_concat[i], LIMBWIDTH)
+        for field j in 0..u32_to_field(NL) do 
+            m[0][i][j] = limbs[j]
+       endfor
+    endfor
+
+    
+    //field[8] hashed = sha512_naive::<M_>(m)
+    field[8] hashed = sha512::<M_,M_LEN_>(m)
+    bool[512] hashed_bits = change_endianness::<512>(bignat_to_bits::<8,64>(new_bignat::<8>(hashed, 64)))
+    BigNat<8> reduced_hash = modulo_reduce::<16,8,WORDSIZE_>(bits_to_bignat::<512,16,32>(hashed_bits), integer_to_bignat::<8,32>(Q))
+    bool[Q_SIZE] h = bignat_to_bits::<8,32>(reduced_hash)[..Q_SIZE]
+    assert(verify_ed25519::<P_,STRIDE_,WORDSIZE_>(r,a,s,h))
+    return true

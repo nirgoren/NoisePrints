@@ -1,0 +1,36 @@
+from "ecdsaFp_struct" import ECPoint_Fp, ECPoint_v2_Fp
+from "../../../zok_utils/struct/adv_struct" import ModuloConstAdv
+from "../../../zok_utils/big_nat" import BigNat
+
+struct BasePowers_Fp<Nm1, S, LS> {
+    ECPoint_Fp[Nm1][S] base_powers
+    ECPoint_Fp[LS] last_base_powers
+}
+
+struct PointAddConstFp {
+    field curvea
+    field curveb
+}
+
+// to test
+struct VerifyECDSASigmaFpConst<NQ, ZG, NG, AC, Nm1, S, LS> {
+    ModuloConstAdv<ZG, NG, AC> const_for_modq
+    PointAddConstFp const_for_pa
+    BigNat<NQ> Q_MODULUS
+    // field Q_MODULUS_FIELD
+    field P_MINUSQ_MINUS1
+    // ECPoint_Fp K_inv // (-1) * H(G)
+    // ECPoint_v2<NP> K_inv // (-1) * H(G)
+    BasePowers_Fp<Nm1, S, LS> Kpow
+}
+
+// struct VerifyECDSASigmaFpSqConst<NQ, ZG, NG, AC> {
+struct VerifyECDSAFpConst<NQ, ZG, NG, AC> {
+    ModuloConstAdv<ZG, NG, AC> const_for_modq
+    PointAddConstFp const_for_pa
+    BigNat<NQ> Q_MODULUS
+    // field Q_MODULUS_FIELD
+    field P_MINUSQ_MINUS1
+    ECPoint_Fp K_inv // (-1) * H(G) or (-1) * G
+}
+

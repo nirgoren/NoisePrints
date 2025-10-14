@@ -1,0 +1,19 @@
+// from "../../zok_utils/big_nat" import BigNatb, BigNat, BigNatModMult, BigNatModMult_v5
+from "../../zok_utils/big_nat" import BigNat
+from "../../zok_utils/struct/adv_struct" import BigNatRSAadv, BigNat_init
+from "../../zok_utils/mod_arithmetic_adv" import partverify_rsa // modularexpon_for_rsa
+from "../../rsa/const/32_adv" import GP_MAXWORD, POSTGP_AUXCONST, D_2048
+import "../../hash/sha256/sha256" as sha256 
+import "../../hash/sha256/sha256_padded" as sha256_padded
+from "../../hash/sha256/utils" import reverse_limbs
+
+from "const" import BITWIDTH, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, EXPBITS, P2, HASH_LIMBWIDTH
+
+const u32 N = 8
+const u32 NL = 3
+const u32 M = (N-1)*512 + 32 // Message length
+
+// def main(private BigNat<P> signature, BigNat<P> issuerkey, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private BigNat<P2> res) -> bool:
+def main(private BigNat_init<P, Lp1> signature, BigNat<P> issuerkey, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private field[N][16][NL] padded_message) -> bool:
+    BigNat<P2> hash = BigNat{limbs: reverse_limbs(sha256_padded::<N, NL>(padded_message, M, HASH_LIMBWIDTH))}
+    return partverify_rsa::<BITWIDTH,W2,W3,P,P2,Z,V,Qm1,Lp1,ZG,CL,NG,AC,EXPBITS>(signature, issuerkey, intermediate, hash, GP_MAXWORD, POSTGP_AUXCONST)

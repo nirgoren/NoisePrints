@@ -1,0 +1,89 @@
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, bits_to_bignat, bignat_to_bits, range_check_bignat, BigNatParams, new_bignat, UncheckedBigNat, integer_to_bignat
+from "../../../zok_utils/unsafe_witness/big_nat/mod_arithmetic" import modulo_reduce
+from "../../../zok_utils/unsafe_witness/range_check" import split_limbs
+from "./group_operations" import is_on_curve, scalar_multG, scalar_mult, point_add, MODULUS, Q_SIZE, Q
+from "./struct" import Point, UncheckedPoint, point_equal
+import "../../../hash/sha512/sha512"
+from "../../../hash/sha512/sha512" import NL,LIMBWIDTH
+import "utils/casts/u32_to_field"
+from "./struct" import integers_to_point, point_to_integers
+
+
+def verify_encode_point<P,LW,WORDSIZE>(bool[256] encoded, bool[255] x_bin) -> Point<P>:
+    assert(P * LW >= 255)
+    assert(encoded[255] == x_bin[0])
+    bool[P*LW] x_bin_padded = [...x_bin, ...[false; P*LW - 255]]
+    bool[P*LW] y_bin_padded = [...encoded[..255], ...[false; P*LW - 255]]
+    BigNat<P> x = bits_to_bignat::<P,LW>(x_bin_padded)
+    BigNat<P> y = bits_to_bignat::<P,LW>(y_bin_padded)
+    assert(range_check_bignat::<P,WORDSIZE>(x))
+    assert(range_check_bignat::<P,WORDSIZE>(y))
+    Point<P> p =  Point { x: x, y: y }
+    assert(is_on_curve::<P,WORDSIZE>(p))
+    return p
+    
+
+def change_endianness<N>(bool[N] input) -> bool[N]:
+    bool[N] output = [false; N]
+    u32 WS = N / 64
+    for u32 i in 0..WS do
+        for u32 j in 0..8 do
+            for u32 k in 0..8 do
+                output[64 * i + 8 *j + k] = input[64 * i + 8 * (8-1-j) + k]
+            endfor
+        endfor
+    endfor
+    return output
+
+    
+def verify_ed25519<P,STRIDE,WORDSIZE>(Point<P> r, Point<P> a, bool[Q_SIZE] s, bool[Q_SIZE] h) -> bool:
+    u32 LW = r.x.params.limbwidth
+    Point<P> p = scalar_multG::<P,LW,STRIDE,WORDSIZE>(s)
+    Point<P> q = point_add::<P,WORDSIZE>(r, a)
+    assert(is_on_curve::<P,WORDSIZE>(p))
+    assert(point_equal::<P>(p,q))
+    return true
+
+const u32 P_ = 8
+const u32 LW_ = 32
+const u32 STRIDE_ = 6
+const u32 WORDSIZE_ = 8
+
+const u32 M_LEN_ = 72
+const u32 M_ = 1
+
+// group order
+
+//from "./const_input" import ENCODED_R, R_X, PK, A_U, S, M, H
+
+//def main() -> integer[2][2]:
+//    Point<P_> r = verify_encode_point::<P_,LW_,WORDSIZE_>(ENCODED_R, R_X)
+//    Point<P_> a = integers_to_point::<P_,LW_>(A_U)
+//    //field[8] to_concat = bits_to_bignat::<8,64>(change_endianness::<512>([...encoded_r, ...pk])).limbs
+//    //for field i in 0..8 do
+//    //    field[NL] limbs = split_limbs(to_concat[i], LIMBWIDTH)
+//    //    for field j in 0..u32_to_field(NL) do 
+//    //        m[0][i][j] = limbs[j]
+//    //   endfor
+//    //endfor
+//    //m[0][0][0] = a_u.x.limbs[0]
+//
+//    //field[8] hashed = sha512::<M_,M_LEN_>(m)
+//    //bool[512] hashed_bits = change_endianness::<512>(bignat_to_bits::<8,64>(new_bignat::<8>(hashed, 64)))
+//    //BigNat<4> reduced_hash = modulo_reduce::<8,4,WORDSIZE_>(bits_to_bignat::<8,64>(hashed_bits), integer_to_bignat::<4,64>(Q))
+//    //bool[Q_SIZE] h = bignat_to_bits::<4,64>(reduced_hash)[..Q_SIZE]
+//    //assert(verify_ed25519::<P_,STRIDE_,WORDSIZE_>(r,a,S,H))
+//    Point<P_> p = scalar_multG::<P_,LW_,STRIDE_,WORDSIZE_>(S)
+//    Point<P_> q = point_add::<P_,WORDSIZE_>(r, scalar_mult::<P_,WORDSIZE_>(H, a))
+//    assert(is_on_curve::<P_,WORDSIZE_>(p))
+//    //assert(point_equal::<P_>(p,q))
+//    return [point_to_integers(p), point_to_integers(q)]
+
+def main(private bool[256] encoded_r, private bool[255] r_x, bool[256] pk, UncheckedPoint<P_> a_u, private bool[Q_SIZE] s, private bool[Q_SIZE] h) -> bool:
+    Point<P_> r = verify_encode_point::<P_,LW_,WORDSIZE_>(encoded_r, r_x)
+    Point<P_> a = Point {
+        x: new_bignat::<P_>(a_u.x.limbs, LW_),
+        y: new_bignat::<P_>(a_u.y.limbs, LW_)
+    }
+    assert(verify_ed25519::<P_,STRIDE_,WORDSIZE_>(r,a,s,h))
+    return true

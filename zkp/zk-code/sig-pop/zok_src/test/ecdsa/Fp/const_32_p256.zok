@@ -1,0 +1,14 @@
+from "const_32" import NLIMBS
+from "../../../ecdsa/Fp-estimate/struct/ecdsaFp_struct" import ECPoint_Fp
+
+const u32 W2 = 1
+const u32 CRL = 127 // bit-length of P_MINUSQ_MINUS1
+const u32 NP2 = NLIMBS/2 // Number of limbes of P - Q (depend on P, Q and limbwidth)
+const u32 Qm1 = NLIMBS
+const u32 CW = 71 // calculate from zk_preprocessor.rs
+
+
+const ECPoint_Fp G_inv = ECPoint_Fp { // inverse of G;
+    x: 48439561293906451759052585252797914202762949526041747995844080717082404635286,
+    y: 79657838253606452964112319029819691573475036742305299123656433055298683448842
+}

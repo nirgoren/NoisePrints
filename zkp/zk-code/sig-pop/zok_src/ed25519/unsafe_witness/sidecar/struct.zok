@@ -1,0 +1,95 @@
+from "../baseline/group_operations" import Q_SIZE
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, UncheckedBigNat, new_bignat_w_bitlen, check_bignat_w_bitlen, new_bignat, bits_to_bignat, integer_to_bignat, bignat_max_value, BigNatParams
+from "../baseline/struct" import MODULUS, Point, UncheckedPoint
+from "EMBED" import FIELD_SIZE_IN_BITS, unpack, FIELD_MODULUS
+
+struct SigmaPrivData<P> {
+    BigNat<P> exponent0
+    BigNat<P> exponent1
+    BigNat<P> exponent2
+    BigNat<P> exponent3
+    BigNat<P> exponent4
+    BigNat<P> exponent5
+    bool[Q_SIZE] v_bits
+    field[2] openings
+    BigNat<P> s
+}
+
+struct SigmaPubData<P> {
+    field[2] hcommit
+    BigNat<P> challenge
+    // Should be a bignat array but partially const values don't play nice with arrays atm
+    BigNat<P> response0
+    BigNat<P> response1
+    BigNat<P> response2
+    Point<P> C1
+}
+
+struct SigmaPrivInput<P> {
+    UncheckedBigNat<P>[6] exponents
+    bool[Q_SIZE] v_bits
+    field[2] openings
+    UncheckedBigNat<P> s
+}
+
+struct SigmaPubInput<P> {
+    field[2] hcommit
+    UncheckedBigNat<P> challenge
+    UncheckedBigNat<P>[3] responses
+    UncheckedPoint<P> C1
+}
+
+
+def to_sigma_priv<P,LW,WORDSIZE>(SigmaPrivInput<P> priv) -> SigmaPrivData<P>:
+    //for u32 i in 0..6 do
+    //    checked_exponents[i] = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[i], LW, 255)
+    //endfor
+    BigNat<P> exponent0 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[0], LW, Q_SIZE)
+    //print("{}", exponent0.params.max_limbs)
+    BigNat<P> exponent1 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[1], LW, Q_SIZE)
+    BigNat<P> exponent2 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[2], LW, Q_SIZE)
+    BigNat<P> exponent3 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[3], LW, Q_SIZE)
+    BigNat<P> exponent4 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[4], LW, Q_SIZE)
+    BigNat<P> exponent5 = check_bignat_w_bitlen::<P,WORDSIZE>(priv.exponents[5], LW, Q_SIZE)
+
+    //assert(bignat_max_value(exponent0.params) < FIELD_MODULUS)
+    //assert(bignat_max_value(exponent1.params) < FIELD_MODULUS)
+    //assert(bignat_max_value(exponent2.params) < FIELD_MODULUS)
+    //assert(bignat_max_value(exponent3.params) < FIELD_MODULUS)
+    //assert(bignat_max_value(exponent4.params) < FIELD_MODULUS)
+    //assert(bignat_max_value(exponent5.params) < FIELD_MODULUS)
+    
+    return SigmaPrivData {
+        exponent0: exponent0,
+        exponent1: exponent1,
+        exponent2: exponent2,
+        exponent3: exponent3,
+        exponent4: exponent4,
+        exponent5: exponent5,
+        v_bits: priv.v_bits,
+        openings: priv.openings,
+        s: check_bignat_w_bitlen::<P,WORDSIZE>(priv.s, LW, Q_SIZE)
+    }
+
+def to_sigma_pub<P,LW>(SigmaPubInput<P> pub) -> SigmaPubData<P>:
+    //BigNat<P>[3] responses_nats = [integer_to_bignat::<P,LW>(0); 3]
+    //for u32 i in 0..3 do
+    //    responses_nats[i] = new_bignat::<P>(pub.responses[i].limbs, LW)
+    //endfor
+    BigNat<P> response0 = new_bignat_w_bitlen::<P>(pub.responses[0].limbs, LW, FIELD_SIZE_IN_BITS)
+    BigNat<P> response1 = new_bignat_w_bitlen::<P>(pub.responses[1].limbs, LW, FIELD_SIZE_IN_BITS)
+    BigNat<P> response2 = new_bignat_w_bitlen::<P>(pub.responses[2].limbs, LW, FIELD_SIZE_IN_BITS)
+    return SigmaPubData {
+        hcommit: pub.hcommit,
+        challenge: new_bignat_w_bitlen::<P>(pub.challenge.limbs, LW, FIELD_SIZE_IN_BITS),
+        response0: response0,
+        response1: response1,
+        response2: response2,
+        C1: Point {
+            x: new_bignat_w_bitlen::<P>(pub.C1.x.limbs, LW, 255),
+            y: new_bignat_w_bitlen::<P>(pub.C1.y.limbs, LW, 255)
+        }
+    }
+
+def main() -> bool:
+    return true

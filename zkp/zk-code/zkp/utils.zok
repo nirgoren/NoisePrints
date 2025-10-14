@@ -1,0 +1,15 @@
+from "EMBED" import sample_challenge
+
+// ceildiv(x,y) == ceil(x/y)
+def ceildiv(u32 x, u32 y) -> u32:
+    return (x+y-1)/y
+
+// Append M-N zeros to input
+def zero_pad<N,M>(field[N] a) -> field[M]:
+    assert(M >= N)
+    field[M] padded = [0; M]
+    for u32 i in 0..N do
+        padded[i] = a[i]
+    endfor
+    return padded
+

@@ -1,0 +1,14 @@
+// from "../../zok_utils/big_nat" import BigNatb, BigNat, BigNatModMult, BigNatModMult_v5
+from "../../zok_utils/big_nat" import BigNat
+from "../../zok_utils/struct/adv_struct" import BigNatRSAadv, BigNat_init
+from "../../zok_utils/mod_arithmetic_adv_naive" import verify_rsa // modularexpon_for_rsa
+from "../../rsa/const/32_adv" import GP_MAXWORD, POSTGP_AUXCONST, D_2048
+
+from "const" import BITWIDTH, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, EXPBITS, P2
+
+
+
+// def main(private BigNat<P> signature, BigNat<P> issuerkey, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private BigNat<P2> res) -> bool:
+def main(private BigNat_init<P, Lp1> signature, BigNat<P> issuerkey, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private BigNat_init<P2, Lp1> res) -> bool:
+    // BigNat<P> digest_result = BigNat{ limbs: [...res.limbs, ...D_2048]}
+    return verify_rsa::<BITWIDTH,W2,W3,P,P2,Z,V,Qm1,Lp1,ZG,CL,NG,AC,EXPBITS>(signature, issuerkey, intermediate, res, GP_MAXWORD, POSTGP_AUXCONST)

@@ -1,0 +1,18 @@
+from "../../ecdsa/const/flatten/basepower_plain_32_6" import Gpow // need fix
+from "../../ecdsa/struct/ecdsastruct" import ECPoint_plain
+
+const u32 READS = 4
+const u32 LEN = 266
+
+const ECPoint_plain<8>[LEN] subtable = Gpow[0u32..LEN]
+
+def main(private field[READS] reads, field val) -> field:
+    field sum = 0
+    for u32 i in 0..READS do
+        ECPoint_plain<8> p = subtable[reads[i]]
+        for u32 j in 0..8 do
+            sum = sum + p.x[j] + p.y[j]
+        endfor
+    endfor
+    return sum
+

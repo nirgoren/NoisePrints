@@ -1,0 +1,181 @@
+from "../../zok_utils/big_nat" import BigNat, BigNatb
+from "struct/ecdsaFp_struct" import ECPoint_Fp, ECPoint_v2_Fp, PointAdd_x_Fp_init, PointAdd_x_Fp
+from "struct/ecdsaFp_conststruct" import PointAddConstFp, BasePowers_Fp
+from "../advanced/group_operation" import bignat_to_bool_vec
+import "utils/casts/u32_from_bits"
+from "../../zok_utils/range_check" import adv_subrangecheck
+from "../../zok_utils/assert_well_formed" import less_than_threshold
+
+
+def to_ecpoint_v2_Fp(ECPoint_Fp point, bool empty) -> ECPoint_v2_Fp:
+    ECPoint_v2_Fp res_point = ECPoint_v2_Fp{ x: point.x, y: point.y, empty: empty}
+    return res_point
+
+// Assume pt1 != pt2
+def incomplete_point_add_inner(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2) -> ECPoint_v2_Fp:
+    // assert(pt1.x != pt2.x) // for debug only
+    // assert(m * (pt1.x - pt2.x) == (pt1.y - pt2.y)) // for debug only
+    field m = (pt1.y - pt2.y)/(pt1.x - pt2.x)
+    field x3 = m*m - pt1.x - pt2.x
+    field y3 = m*(pt1.x - x3) - pt1.y
+    ECPoint_v2_Fp output = ECPoint_v2_Fp { x: x3, y: y3, empty: false}
+    return output
+
+def incomplete_point_add(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2) -> ECPoint_v2_Fp:
+    return if pt1.empty then pt2 else (if pt2.empty then pt1 else incomplete_point_add_inner(pt1, pt2) fi) fi
+
+// assume pt2 is not infinity point
+def incomplete_point_add_v2(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2) -> ECPoint_v2_Fp:
+    return if pt1.empty then pt2 else incomplete_point_add_inner(pt1, pt2) fi
+
+// to test
+def point_add_inner(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2, field m1, field m2, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    assert((pt1.x - pt2.x) * m1 == (pt1.y - pt2.y))
+    assert(2 * pt1.y * m2 == 3 * pt1.x * pt2.x + helper_const.curvea)
+    bool x_equal = pt1.x == pt2.x // actually I also need to check if y1 = y2
+    bool empty = x_equal && (pt1.y != pt2.y) // the sum of two points is at infinity iff pt1 = -pt2
+    // bool empty = (!x_equal) || (pt1.y == pt2.y) // when pt1 = -pt2, the sum of two points is at infinity // wrong
+    field m = if x_equal then m2 else m1 fi
+    field x3 = m * m - pt1.x - pt2.x
+    field y3 = m*(pt1.x - x3) - pt1.y
+    ECPoint_v2_Fp output = ECPoint_v2_Fp { x: x3, y: y3, empty: empty}
+    return output
+
+// assume pt2 is not infinity point
+def point_add_v2(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2, field m1, field m2, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    return if pt1.empty then pt2 else point_add_inner(pt1, pt2, m1, m2, helper_const) fi
+
+def point_double(ECPoint_v2_Fp pt, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    // field m = (3 * pt.x * pt.x + helper_const.curvea)
+    assert(pt.y != 0)
+    field m = (3 * pt.x * pt.x + helper_const.curvea) / (2 * pt.y)
+    // field m = (3 * pt.x * pt.x + helper_const.curvea) * (2 * pt.y) // for debug only; to delete
+    field x3 = m*m - 2*pt.x
+    field y3 = m*(pt.x - x3) - pt.y
+    return ECPoint_v2_Fp{x: x3, y: y3, empty: pt.empty}
+
+// k is in boolean representation
+def scalar_mult_bool<TOTAL>(bool is_k_equal_q, bool[TOTAL] k, ECPoint_Fp pt, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    assert(TOTAL == 256)
+    ECPoint_v2_Fp addend = to_ecpoint_v2_Fp(pt, false)
+    ECPoint_v2_Fp result = ECPoint_v2_Fp{x: 0, y: 0, empty: true}// to_ecpoint_v2_Fp(pt, true)
+
+    for u32 i in 0..TOTAL do
+        result = if k[TOTAL-i-1] then incomplete_point_add_v2(result, addend) else result fi
+        addend = point_double(addend, helper_const)
+    endfor
+
+    result.empty = is_k_equal_q
+    return result
+
+// to test
+def scalar_mult<W, NQ>(bool is_k_equal_q, BigNatb<NQ, W> k, ECPoint_Fp pt, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    ECPoint_v2_Fp addend = to_ecpoint_v2_Fp(pt, false)
+    ECPoint_v2_Fp result = ECPoint_v2_Fp{x: 0, y: 0, empty: true}// to_ecpoint_v2_Fp(pt, true)
+
+    for u32 j in 0..NQ do
+        for u32 i in 0..W do
+            result = if k.limbs[j][W-i-1] then incomplete_point_add_v2(result, addend) else result fi // iterate from the least significant bit
+            addend = point_double(addend, helper_const) // if pt is not identity point, addend will never be identity point since 2^n mod q != 0 for any positive integer n
+        endfor
+    endfor
+    result.empty = is_k_equal_q
+    return result
+
+def scalar_mult_w_incomplete_cached_window_method<W, NQ, Nm1, S, LS, PA, WS>(bool is_k_equal_q, BigNat<NQ> k, BasePowers_Fp<Nm1, S, LS> base_powers) -> ECPoint_v2_Fp: // pt is a fixed point and thus it is checked to be on curve in the setup phase 
+    // step 1: Split append_k into chunks of length 5 (the least significant chunk might have length < 5)
+    u32 TOTAL = NQ * W
+    bool[TOTAL] append_k = bignat_to_bool_vec::<NQ, W, TOTAL>(k)
+
+    assert(W == 32)
+
+    u32 N_CHUNKS = PA + 1
+    u32 start = 0 // bit-0 is the most significant bit
+    u32[N_CHUNKS] k_chunks = [0; N_CHUNKS] // note: 52 = ceil(W*NP/WS)
+
+    for u32 i in 0..PA do
+        k_chunks[i] = u32_from_bits([...[false; 32-WS], ...append_k[start..start+WS]])
+        start = start + WS
+    endfor
+
+    u32 remain_WS = if (W*NQ) % WS == 0 then WS else (W*NQ) % WS fi
+    k_chunks[PA] = u32_from_bits([...[false; 32-remain_WS], ...append_k[start..start+remain_WS]])
+
+    // step 2: apply window method
+    ECPoint_Fp point_plain = base_powers.base_powers[0][k_chunks[0]]
+    ECPoint_v2_Fp result = to_ecpoint_v2_Fp(point_plain, (k_chunks[0] == 0))
+
+    u32 idx_pd = 0
+    for u32 i in 1..PA do // 3, 4 ok
+        point_plain = base_powers.base_powers[i][k_chunks[i]]
+        ECPoint_v2_Fp intermediate_point = to_ecpoint_v2_Fp(point_plain, (k_chunks[i] == 0))
+
+        result = incomplete_point_add(result, intermediate_point)
+    endfor
+
+    point_plain = base_powers.last_base_powers[k_chunks[PA]]
+    ECPoint_v2_Fp intermediate_point = to_ecpoint_v2_Fp(point_plain, (k_chunks[PA] == 0))
+
+    result = incomplete_point_add(result, intermediate_point)
+
+    result.empty = is_k_equal_q
+    return result
+
+
+
+// to test
+def PointAdd_x_Fp_init_to_PointAdd_x_Fp<BW, NQ, NP2, CRL>(PointAdd_x_Fp_init<CRL> input, BigNat<NQ> r, field P_MINUSQ_MINUS1) -> PointAdd_x_Fp:
+    field carry_r = adv_subrangecheck::<CRL, BW>(input.carry_r)
+    bool quotient_r = less_than_threshold::<NQ, NP2, BW>(r, carry_r, P_MINUSQ_MINUS1)
+    PointAdd_x_Fp output = PointAdd_x_Fp {
+                            m1: input.m1,
+                            m2: input.m2,
+                            quotient_r: quotient_r
+                        }
+    return output
+
+def check_for_u_hat_inner(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2, PointAdd_x_Fp intermediate, PointAddConstFp helper_const) -> field:
+    assert((pt1.x - pt2.x) * intermediate.m1 == (pt1.y - pt2.y))
+    assert(2 * pt1.y * intermediate.m2 == 3 * pt1.x * pt2.x + helper_const.curvea)
+    bool x_equal = pt1.x == pt2.x // actually I also need to check if y1 = y2
+    assert((!x_equal) || (pt1.y == pt2.y)) // assert(non_empty); get rid of the case that pt1.x == pt2.x &&  pt1.y != pt2.y
+    field m = if x_equal then intermediate.m2 else intermediate.m1 fi
+    field x3 = m * m - pt1.x - pt2.x
+    return x3
+    // field r_with_mod = if intermediate.quotient_r then r + modq else r fi
+    // return x3 == r_with_mod
+
+
+def BigNat_to_field<P, W>(BigNat<P> input) -> field:
+    field base = 2 ** W
+    field shift = 1
+    field output = 0
+    for u32 i in 0..P do
+        output = output + input.limbs[i] * shift
+        shift = shift * base
+    endfor
+    return output
+// corresponind to point_double from "check_for_u_hat"; to modify
+// assuming either pt1 or pt2 is non infinity
+def check_for_u_hat<W, BW, NQ, NP2, CRL>(ECPoint_v2_Fp pt1, ECPoint_v2_Fp pt2, PointAdd_x_Fp_init<CRL> intermediate, BigNat<NQ> r, BigNat<NQ> Q_MODULUS, PointAddConstFp helper_const, field P_MINUSQ_MINUS1) -> bool:
+    PointAdd_x_Fp intermediate_checked = PointAdd_x_Fp_init_to_PointAdd_x_Fp::<BW, NQ, NP2, CRL>(intermediate, r, P_MINUSQ_MINUS1)
+    // convert BigNat<NQ> r to field r
+    field r_field = BigNat_to_field::<NQ, W>(r)
+    field q_field = BigNat_to_field::<NQ, W>(Q_MODULUS)
+
+    field x3 = if pt1.empty then pt2.x else (if pt2.empty then pt1.x else check_for_u_hat_inner(pt1, pt2, intermediate_checked, helper_const) fi) fi
+    field r_with_mod = if intermediate_checked.quotient_r then r_field + q_field else r_field fi
+    return x3 == r_with_mod
+
+def compute_R<W, BW, NQ, NP2, CRL>(field R_y, field[CRL] carry_r, BigNat<NQ> r, BigNat<NQ> Q_MODULUS, field P_MINUSQ_MINUS1) -> ECPoint_Fp:
+    field carry_r_field = adv_subrangecheck::<CRL, BW>(carry_r)
+    bool quotient_r = less_than_threshold::<NQ, NP2, BW>(r, carry_r_field, P_MINUSQ_MINUS1)
+    field r_field = BigNat_to_field::<NQ, W>(r)
+    field q_field = BigNat_to_field::<NQ, W>(Q_MODULUS)
+    field R_x = if quotient_r then r_field + q_field else r_field fi
+    ECPoint_Fp output = ECPoint_Fp {x: R_x, y: R_y}
+    // ECPoint_Fp output = ECPoint_Fp {x: 0, y: R_y} // for debug only
+    return output
+
+def is_on_curve(ECPoint_Fp point, PointAddConstFp helper_const) -> bool:
+    return point.y * point.y == point.x * point.x * point.x + helper_const.curvea * point.x + helper_const.curveb

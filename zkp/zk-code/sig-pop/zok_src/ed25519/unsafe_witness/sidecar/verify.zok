@@ -1,0 +1,113 @@
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, bits_to_bignat, bignat_to_bits, range_check_bignat, check_bignat_w_bitlen, BigNatParams, new_bignat, UncheckedBigNat, integer_to_bignat, new_bignat_w_bitlen, bignat_max_value,bignat_to_integer
+from "../../../zok_utils/unsafe_witness/big_nat/mod_arithmetic" import modulo_reduce, add, multiply, modulo_equal
+from "../../../zok_utils/unsafe_witness/util" import ceildiv
+from "../../../zok_utils/unsafe_witness/range_check" import split_limbs,combine_limbs
+from "../baseline/group_operations" import scalar_mult_cached_window, point_add, MODULUS, Q_SIZE, Q, reverse_bits
+from "../baseline/struct" import Point, UncheckedPoint, point_equal, integers_to_point, point_to_integers,BasePowers
+import "../../../hash/sha512/sha512"
+from "../../../hash/sha512/sha512" import NL,LIMBWIDTH,sha512_padded_length
+from "../baseline/verify" import verify_encode_point, change_endianness
+from "./struct" import SigmaPubData, SigmaPrivData, SigmaPubInput, SigmaPrivInput, to_sigma_priv, to_sigma_pub
+import "utils/pack/bool/pack"
+import "utils/casts/u32_to_field"
+import "hashes/poseidon/poseidon"
+from "./basepowers" import get_K_base_powers
+from "EMBED" import FIELD_SIZE_IN_BITS
+
+
+def scalar_multK<B,P,LW,STRIDE,WORDSIZE>(bool[B] exp) -> Point<P>:
+    BasePowers<P,LW,STRIDE> base_powers = get_K_base_powers::<P,LW,STRIDE>()
+    return scalar_mult_cached_window::<B,P,LW,STRIDE,WORDSIZE>(exp, base_powers)
+
+def check_response<P,WORDSIZE>(BigNat<P> expo, BigNat<P> rand, BigNat<P> challenge, BigNat<P> response) -> bool:
+    u32 P2 = P + P - 1 
+    u32 LW = expo.params.limbwidth
+    BigNat<P> MOD_NAT = integer_to_bignat::<P,LW>(Q)
+    BigNat<P2> lhs = add::<P,P2,P2>(rand, multiply::<P,P,P2>(expo, challenge))
+    assert(modulo_equal::<P2,P,P,WORDSIZE>(lhs, response, MOD_NAT))
+    return true
+
+
+def verify_exponents<P,WORDSIZE>(SigmaPubData<P> pub, SigmaPrivData<P> priv, BigNat<P> h) -> bool:
+    u32 P2 = 2*P - 1
+    u32 LW = h.params.limbwidth
+
+    BigNat<P> MOD_NAT = integer_to_bignat::<P,LW>(Q)
+
+    //h*e1 = -1 => h * e1 = Q-1
+    assert(modulo_equal::<P2,P,P,WORDSIZE>(multiply::<P,P,P2>(priv.exponent0, h), integer_to_bignat::<P,LW>(Q-1), MOD_NAT))
+
+    // h * e2 == v
+    BigNat<P> v_nat = bits_to_bignat::<Q_SIZE,P,LW>(priv.v_bits)
+    assert(modulo_equal::<P2,P,P,WORDSIZE>(multiply::<P,P,P2>(priv.exponent1, h), v_nat, MOD_NAT))
+
+    //e0 * h = S
+    assert(modulo_equal::<P2,P,P,WORDSIZE>(multiply::<P,P,P2>(priv.exponent2, h), priv.s, MOD_NAT))
+
+
+    assert(check_response::<P,WORDSIZE>(priv.exponent0, priv.exponent3, pub.challenge, pub.response0))
+    assert(check_response::<P,WORDSIZE>(priv.exponent1, priv.exponent4, pub.challenge, pub.response1))
+    assert(check_response::<P,WORDSIZE>(priv.exponent2, priv.exponent5, pub.challenge, pub.response2))
+    //for u32 i in 0..3 do
+    //    assert(check_response::<P,WORDSIZE>(priv.exponents[i], priv.exponents[i+3], pub.challenge, pub.response[i]))
+    //endfor
+    return true
+
+
+def verify_commitments<P,LW>(SigmaPubData<P> pub, SigmaPrivData<P> priv) -> bool:
+    field[2][5] poseidon_inputs = [[
+        combine_limbs::<P>(priv.exponent0.limbs, [LW; P]),
+        combine_limbs::<P>(priv.exponent1.limbs, [LW; P]),
+        combine_limbs::<P>(priv.exponent2.limbs, [LW; P]),
+        combine_limbs::<P>(priv.exponent3.limbs, [LW; P]), 
+        priv.openings[0]
+    ], [
+        combine_limbs::<P>(priv.exponent4.limbs, [LW; P]),
+        combine_limbs::<P>(priv.exponent5.limbs, [LW; P]),
+        pack(reverse_bits(priv.v_bits)),
+        0,
+        priv.openings[1]
+    ]]
+
+
+    for u32 i in 0..2 do
+        assert(pub.hcommit[i] == poseidon(poseidon_inputs[i]))
+    endfor
+    return true
+    
+
+def ed25519_verify_inner<P,STRIDE,WORDSIZE>(SigmaPubData<P> pub, SigmaPrivData<P> priv, BigNat<P> h, Point<P> r) -> bool:
+    u32 LW = h.params.limbwidth
+    assert(verify_commitments::<P,LW>(pub, priv))
+    assert(verify_exponents::<P,WORDSIZE>(pub, priv, h))
+    assert(point_equal(point_add::<P,WORDSIZE>(r, scalar_multK::<Q_SIZE,P,LW,STRIDE,WORDSIZE>(priv.v_bits)), pub.C1))
+    return true
+
+
+def ed25519_verify_nohash<P,LW,STRIDE,WORDSIZE>(bool[256] pk, SigmaPubInput<P> pub_i, SigmaPrivInput<P> priv_i, private bool[256] encoded_r, private bool[255] r_x, BigNat<P> h) -> bool:
+    Point<P> r = verify_encode_point::<P,LW,WORDSIZE>(encoded_r, r_x)
+    SigmaPrivData<P> priv = to_sigma_priv::<P,LW, WORDSIZE>(priv_i)
+    SigmaPubData<P> pub = to_sigma_pub::<P,LW>(pub_i)
+    assert(ed25519_verify_inner::<P,STRIDE,WORDSIZE>(pub, priv, h, r))
+    return true
+
+
+def sha_rounds<MSG_BYTES>() -> u32:
+    return sha512_padded_length(MSG_BYTES + 64u32) / 128u32
+
+def ed25519_verify_w_hash<P,LW,STRIDE,WORDSIZE,MSG_BYTES>(bool[256] pk, SigmaPubInput<P> pub_i, SigmaPrivInput<P> priv_i, bool[256] encoded_r, bool[255] r_x, field[sha_rounds::<MSG_BYTES>()][16][NL] m) -> bool:
+    field[8] to_concat = bits_to_bignat::<512,8,64>(change_endianness::<512>([...encoded_r, ...pk])).limbs
+    for field i in 0..8 do
+        field[NL] limbs = split_limbs(to_concat[i], LIMBWIDTH)
+        for field j in 0..u32_to_field(NL) do 
+            m[0][i][j] = limbs[j]
+       endfor
+    endfor
+    u32 FULL_M_LEN = MSG_BYTES + 64
+    u32 SHAROUNDS = sha_rounds::<MSG_BYTES>()
+    field[8] hashed = sha512::<SHAROUNDS,FULL_M_LEN>(m)
+    bool[512] hashed_bits = change_endianness::<512>(bignat_to_bits::<8,64>(new_bignat::<8>(hashed, 64)))
+    u32 P2 = ceildiv(512, LW)
+    BigNat<P> h = modulo_reduce::<P2,P,WORDSIZE>(bits_to_bignat::<512,P2,LW>(hashed_bits), integer_to_bignat::<P,LW>(Q))
+    assert(ed25519_verify_nohash::<P,LW,STRIDE,WORDSIZE>(pk, pub_i, priv_i, encoded_r, r_x, h))
+    return true

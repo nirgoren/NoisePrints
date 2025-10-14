@@ -1,0 +1,14 @@
+// from "../../zok_utils/big_nat" import BigNatb, BigNat, BigNatModMult, BigNatModMult_v5
+from "../../zok_utils/big_nat" import BigNat
+from "../../zok_utils/struct/adv_struct" import BigNatRSAadv, BigNat_init
+from "../../zok_utils/mod_arithmetic_adv" import verify_rsa // modularexpon_for_rsa
+from "../../rsa/const/32_adv" import GP_MAXWORD, POSTGP_AUXCONST, D_2048
+
+from "const" import BITWIDTH, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, EXPBITS, P2
+
+
+const BigNat<P> ISSUERKEY = BigNat {limbs: [2612103581, 2411572935, 3068366161, 4137691067, 2562322571, 422254486, 1796410508, 769395638, 3392043005, 2578756834, 1550655741, 4017113543, 197760591, 3687479051, 10550097, 727291521, 2328518425, 1346996197, 3949140028, 704807040, 738653969, 635010966, 2594609598, 2533358732, 4233588250, 779704156, 3757012356, 1057005443, 1216100173, 3392073706, 229178749, 872883716, 3643499862, 2520913871, 1157767648, 3216504544, 810062619, 1099291969, 291756212, 1206890564, 1139486375, 3585917876, 3929859485, 926619540, 3143574903, 273528628, 1431567929, 1754494775, 3965144166, 1773910388, 2216677865, 615152179, 1121345110, 151685882, 60363644, 4129089938, 1512301209, 2768203241, 4259892075, 4217733669, 2137819088, 4164371088, 1653349943, 4119388135]}
+// def main(private BigNat<P> signature, BigNat<P> issuerkey, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private BigNat<P2> res) -> bool:
+def main(private BigNat_init<P, Lp1> signature, private BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, private BigNat_init<P2, Lp1> res) -> bool:
+    // BigNat<P> digest_result = BigNat{ limbs: [...res.limbs, ...D_2048]}
+    return verify_rsa::<BITWIDTH,W2,W3,P,P2,Z,V,Qm1,Lp1,ZG,CL,NG,AC,EXPBITS>(signature, ISSUERKEY, intermediate, res, GP_MAXWORD, POSTGP_AUXCONST)

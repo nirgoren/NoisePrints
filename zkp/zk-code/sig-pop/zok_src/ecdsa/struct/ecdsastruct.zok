@@ -1,0 +1,182 @@
+from "../../zok_utils/big_nat" import BigNat, BigNatb, BigNatMod, BigNatb_v2, BigNatModMultwores_v5
+
+struct ECPoint<P> {
+    BigNat<P> x
+    BigNat<P> y
+}
+
+struct ECPointb<P, W> {
+    BigNatb<P, W> x
+    BigNatb<P, W> y
+}
+
+struct ECPoint_v2<P> {
+    BigNat<P> x
+    BigNat<P> y
+    bool empty
+}
+
+struct ECPoint_plain<P> {
+    field[P] x
+    field[P] y
+}
+
+struct ECDSASignature<Q> {
+    BigNat<Q> r // can be public since it is just the x-coordinate of a random elliptic curve point
+    BigNat<Q> s
+}
+
+struct ECDSASignatureb<Q, W> {
+    BigNatb<Q, W> r // can be public since it is just the x-coordinate of a random elliptic curve point
+    BigNatb<Q, W> s
+}
+
+struct ECDSACertificate<P, Q, N, W> {
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint<P> issuerkey // private
+    u32[N][16] padded_message
+}
+
+struct ECDSACertificate_v2<P, Q, N, W> {
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_v2<P> issuerkey // private
+    u32[N][16] padded_message
+}
+
+struct ECDSACertificate_v2_hash<P, Q, N, W> {
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_v2<P> issuerkey // private
+    u32[8] digest_result
+}
+
+struct ECDSACertificate_v2_hash_64<P, Q, N, W> { // W = 64
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_v2<P> issuerkey // private
+    u64[P] digest_result
+}
+
+struct ECDSACertificate_v2_hash_32<P, Q, N, W> { // W = 32
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_v2<P> issuerkey // private
+    u32[P] digest_result
+}
+
+struct ECDSACertificate_v2_hash_16<P, Q, N, W> { // W = 16
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_v2<P> issuerkey // private
+    u16[P] digest_result
+}
+
+
+struct ECDSACertificate_proc<P, Q> { // W = 64
+    ECDSASignature<Q> signature
+    ECPoint_v2<P> issuerkey // private
+    BigNat<Q> digest_result
+}
+
+struct BigNatECDSA_v4<W, W2, NP, NQ, Z, V, Qm1, CW, CW2> { // be careful of the generics
+    BigNatb<NQ, W> a
+    BigNatb<NQ, W> b
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_a
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_b
+    ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2>[2] scalarmul
+    PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct BigNatECDSA_v5<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA, PD> { // with window method for a*G
+    BigNatb<NQ, W> a
+    BigNatb<NQ, W> b
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_a
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_b
+    ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW2> scalarmul_a
+    ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+    PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> { // with cached window method for a*G
+    BigNatb<NQ, W> a
+    BigNatb<NQ, W> b
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_a
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_b
+    PointAdd3<W, W2, NP, Z, V, Qm1, CW2>[PA] scalarmul_a
+    // ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW2> scalarmul_a
+    ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+    PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct BigNatECDSA_v7<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> { // with cached window method for a*G
+    BigNatb<NQ, W> a
+    BigNatb<NQ, W> b
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_a
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_b
+    PointAdd3<W, W2, NP, Z, V, Qm1, CW2>[PA] scalarmul_a
+    // ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW2> scalarmul_a
+    ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+    PointAdd_x<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct PointDouble3<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatb<P, W>[3] remainders
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+}
+
+struct PointAdd3<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+    BigNat<Z>[7] products
+    BigNatb<P, W>[4] remainders
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[4] intermediate_mod // last limb of quotient has W2 bits
+}
+
+struct PointAdd_plain<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+    BigNat<Z>[7] products
+    BigNatb<P, W>[2] remainders
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[4] intermediate_mod // last limb of quotient has W2 bits
+}
+
+// check if x-coordinate of pt1+pt2 equals r in Fq
+struct PointAdd4<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatb<P, W>[2] remainders
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+    bool quotient_r
+}
+
+// check if x-coordinate of pt1+pt2 equals r in Fq
+struct PointAdd_x<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatb<P, W>[2] remainders
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+    field carry_r
+}
+// PointDouble3<W, W2, P, Z, V, Qm1, CW> intermediate
+struct ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW> {
+    PointAdd3<W, W2, NP, Z, V, Qm1, CW>[NQ][W] mm_for_pa
+    PointDouble3<W, W2, NP, Z, V, Qm1, CW>[NQ][W] mm_for_pd
+}
+
+// PA: number of point additions
+// PD: number of point double
+struct ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW> {
+    PointAdd3<W, W2, NP, Z, V, Qm1, CW>[PA] mm_for_pa
+    PointDouble3<W, W2, NP, Z, V, Qm1, CW>[PD] mm_for_pd
+}
+
+
+// N: ceil(256 / stride)-1
+// S: 2 ** stride
+// LS: 2**(256%stride) // if 256%stide == 0, then LS = 2**stride
+struct BasePowers<P, Nm1, S, LS> {
+    ECPoint_v2<P>[Nm1][S] base_powers
+    ECPoint_v2<P>[LS] last_base_powers
+}
+
+struct BasePowers_plain<P, Nm1, S, LS> {
+    ECPoint_plain<P>[Nm1][S] base_powers
+    ECPoint_plain<P>[LS] last_base_powers
+}
+
+// struct BasePowers_flatten<P, Nm1, S, LS> {
+//     ECPoint_v2<P>[Nm1][S] base_powers
+//     ECPoint_v2<P>[LS] last_base_powers
+// }
+// struct BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> { // be careful of the generics

@@ -1,0 +1,42 @@
+// If work, replace mod_arithmetic_adv
+from "../big_nat" import BigNatb_v2, BigNatb, BigNat, GpBigNats, BigNatModMult_v5 // BigNatModMult, BigNatModMult_v2, BigNatModMult_v4,
+from "../../rsa/rsastruct" import BigNatRSA_v5 // BigNatRSA, BigNatRSA_v2, BigNatRSA_v4, BigNatRSA_v5
+
+
+
+from "../struct/adv_struct" import BigNatRSAadv, BigNatModMultadv, BigNat_init_quotient, BigNat_init
+from "../range_check" import assert_well_formed, adv_rangecheck, assert_well_formed_for_special_form, assert_well_formed_for_special_form_v2
+
+from "../basic/mod_arithmetic" import simplemodmultiply
+
+
+// W: subtable bitwidth
+// W2: Limbwidth%W
+// W3: Remaining number of bits for quotient
+// NG: Number of groups
+// LG: Limbs per groups
+// corresponding to from "../zok_utils/modulomultiply_v3" import modularmultiply_wo_checking_output
+def modmultiply_wo_check_res<W, W2, W3, A, B, P, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNat_init_quotient<Qm1, Lp1> quotientb, BigNat_init<ZG, CL> carryb, field[NG] gp_maxword, field[AC] aux_const) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    u32 Q = Qm1 + 1
+    BigNat<Q> quotient = assert_well_formed_for_special_form::<Q, Qm1, Lp1, W, W2, W3>(quotientb)
+    BigNat<ZG> carry = adv_rangecheck::<ZG, CL, W>(carryb)
+    u32 LIMBWIDTH = W*(Lp1-1)+W2
+    
+    assert(LIMBWIDTH == 32)
+
+    return simplemodmultiply::<LIMBWIDTH, A, B, P, Z, V, Q, P, ZG, NG, LG, AC>(a, b, z, modulus, remainder, v, quotient, carry, gp_maxword, aux_const)
+
+// LIMBWIDTH = W*Lp1
+def modmultiply_wo_check_res_v2<W, W3, A, B, P, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNat_init_quotient<Qm1, Lp1> quotientb, BigNat_init<ZG, CL> carryb, field[NG] gp_maxword, field[AC] aux_const) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    u32 Q = Qm1 + 1
+    BigNat<Q> quotient = assert_well_formed_for_special_form_v2::<Q, Qm1, Lp1, W, W3>(quotientb)
+    BigNat<ZG> carry = adv_rangecheck::<ZG, CL, W>(carryb)
+    u32 LIMBWIDTH = W*Lp1
+    
+    assert(LIMBWIDTH == 32)
+    
+    return simplemodmultiply::<LIMBWIDTH, A, B, P, Z, V, Q, P, ZG, NG, LG, AC>(a, b, z, modulus, remainder, v, quotient, carry, gp_maxword, aux_const)

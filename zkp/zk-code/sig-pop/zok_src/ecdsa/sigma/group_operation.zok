@@ -1,0 +1,73 @@
+from "../advanced/group_operation" import PointAdd_x_init_to_PointAdd_x_checked
+from "../struct/ecdsastruct" import ECPoint_plain, ECPoint_v2, BasePowers_plain //, PointDouble3, PointAdd3, ScalarMult, BasePowers, ScalarMultWindow
+from "../struct/ecdsa_advstruct" import PointDouble_init, PointDouble, PointAdd_init, PointAdd, PointAdd_x_init, PointAdd_x_checked, ScalarMult_init
+from "../struct/ecdsaconst_advstruct" import PointDoubleConstAdv, PointAddConstAdv, ScalarMultConstAdv
+from "../../zok_utils/struct/adv_struct" import BigNatModMult_init, BigNat_init_quotient, BigNat_init, BigNatModMult, BigNatModMultadv, BigNatModMult_wores_adv
+from "../../zok_utils/scalar_mult" import scalar_multiply_bignat
+from "../../zok_utils/is_equal" import is_equal_v2
+from "../../zok_utils/big_nat" import BigNat, BigNatb, ModuloHelperConst
+from "../../zok_utils/modulomultiply" import addition, checkmultiply
+from "../../zok_utils/basic/mod_arithmetic" import modulo
+
+from "../../zok_utils/struct/adv_struct" import ModuloConstAdv, BigNatModMult_wores
+
+// corresponding to check_for_u_hat from "zok_src/ecdsa/verifyecdsa_dynamic_stride"
+def check_for_u_hat_inner<W, NQ, NP, Z, V, Q, ZG, NG, LG, AC, P_SQU>(ECPoint_v2<NP> pt1, ECPoint_v2<NP> pt2, PointAdd_x_checked<NP, Z, V, Q, ZG> intermediate, BigNat<NP> r, BigNat<NQ> q_modulus, PointAddConstAdv<NP, P_SQU, ZG, NG, AC> helper_const) -> bool:
+    // 1.1 compute m1 = (y1 - y2) * inverse_mod(x1 - x2, curve.p)  <=> m*(x1-x2)+y2 == p*quotient + y1 
+    // <=> m*(x1+2*p) + y2 == p*(quotient + 2*m) + y1 + m*x2
+    BigNat<NP> two_p = scalar_multiply_bignat::<NP, 2>(helper_const.P_MODULUS) // 2*p
+    BigNat<NP> x1_plus_2p = addition::<NP, NP>(pt1.x, two_p) // x1+2*p
+
+    BigNat<NP> m1 = intermediate.intermediate_mod[0].res
+    assert(checkmultiply::<NP, NP, Z>(m1, x1_plus_2p, intermediate.products[0])) // m*(x1+2*p)
+    BigNat<Z> res_left = addition::<Z, NP>(intermediate.products[0], pt2.y) // m*(x1+2*p) + y2
+
+    assert(checkmultiply::<NP, NP, Z>(m1, pt2.x, intermediate.products[1])) // m*x2
+    BigNat<Z> remainder_new = addition::<Z, NP>(intermediate.products[1], pt1.y) // m*x2 + y1
+    // In this case, the number of bits of quotient = 258
+    assert(modulo::<W, NP, Z, V, Q, Z, ZG, NG, LG, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotient, intermediate.intermediate_mod[0].carry, helper_const.MODULO_CONST[0].gp_maxword, helper_const.MODULO_CONST[0].aux_const))
+    // Z->Z, R->Z
+
+    // 1.2 compute m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // <=> 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    BigNat<NP> m2 = intermediate.intermediate_mod[1].res
+    BigNat<NP> double_y = scalar_multiply_bignat::<NP, 2>(pt1.y) // 2*y; the result might not be well-formed
+    assert(checkmultiply::<NP, NP, Z>(m2, double_y, intermediate.products[2])) // m*(2*y)
+    u32 DOUBLE_P = 2*NP // DOUBLE_P should equal V
+    BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[2]) // 12*p*p + 2*y*m
+
+    BigNat<NP> three_x1 = scalar_multiply_bignat::<NP, 3>(pt1.x)
+    assert(checkmultiply::<NP, NP, Z>(three_x1, pt2.x, intermediate.products[3])) // check if (3*pt.x) * pt.x == squ_x
+    BigNat<Z> remainder_new1 = addition::<Z, NP>(intermediate.products[3], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    assert(modulo::<W, NP, DOUBLE_P, V, Q, Z, ZG, NG, LG, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotient, intermediate.intermediate_mod[1].carry, helper_const.MODULO_CONST[1].gp_maxword, helper_const.MODULO_CONST[1].aux_const))
+    // Z->DOUBLE_P, R->Z
+
+    bool x_equal = is_equal_v2(pt1.x, pt2.x) // actually I also need to check if y1 = y2
+    BigNat<NP> m = if x_equal then m2 else m1 fi
+    assert(!x_equal || is_equal_v2(pt1.y, pt2.y)) // get rid of the case that pt1.x == pt2.x &&  pt1.y != pt2.y
+    // 2. check that x3 = m * m - x1 - x2 % p and r = x3 % q
+    // <=> m*m + 4*p == p*(quotient+4) + q*(quotient') + r + x1 + x2 where quotient' = 0 or 1
+    assert(checkmultiply::<NP, NP, Z>(m, m, intermediate.products[4])) // m*m
+    BigNat<NP> four_p = scalar_multiply_bignat::<NP, 4>(helper_const.P_MODULUS) // 4*p
+    BigNat<Z> res_left2 = addition::<Z, NP>(intermediate.products[4], four_p) // m*m + 4*p
+
+    BigNat<NP> x1_plus_x2 = addition::<NP, NP>(pt1.x, pt2.x)
+    BigNat<NP> x3 = if intermediate.quotient_r then addition::<NP, NP>(r, q_modulus) else r fi
+
+    BigNat<NP> remainder_new2 = addition::<NP, NP>(x1_plus_x2, x3) // x1+x2+x3
+    // In this case, the number of bits of quotient = 257
+
+    // Z->Z, R->P
+    return modulo::<W, NP, Z, V, Q, NP, ZG, NG, LG, AC>(res_left2, helper_const.P_MODULUS, remainder_new2, intermediate.last_intermediate.v, intermediate.last_intermediate.quotient, intermediate.last_intermediate.carry, helper_const.MODULO_CONST[2].gp_maxword, helper_const.MODULO_CONST[2].aux_const)
+
+
+
+// Corresponding to check_for_u_hat in zok_src/ecdsa/advanced/group_operation.zok
+def check_for_u_hat<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU>(ECPoint_v2<NP> pt1, ECPoint_v2<NP> pt2, PointAdd_x_init<NP, Z, V, Qm1, Lp1, ZG, CL, CRL> intermediate, BigNat<NQ> r, BigNat<NQ> q_modulus, PointAddConstAdv<NP, P_SQU, ZG, NG, AC> helper_const, field P_MINUSQ_MINUS1) -> bool:
+    u32 Q = Qm1 + 1
+    u32 BW2 = W % BW
+    assert(W == 32)
+    PointAdd_x_checked<NP, Z, V, Q, ZG> intermediate_checked = PointAdd_x_init_to_PointAdd_x_checked::<BW, BW2, NQ, NP, NP2, Z, V, Q, Qm1, Lp1, ZG, CL, CRL, NG, AC>(intermediate, r, P_MINUSQ_MINUS1, helper_const.MODULO_CONST[0..3]) // 0, 1, 2
+    return check_for_u_hat_inner::<W, NQ, NP, Z, V, Q, ZG, NG, LG, AC, P_SQU>(pt1, pt2, intermediate_checked, r, q_modulus, helper_const)

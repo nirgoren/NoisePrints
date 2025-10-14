@@ -1,0 +1,77 @@
+from "../../zok_utils/big_nat" import BigNat, ModuloConst, ModuloHelperConst
+from "ecdsastruct" import ECPoint_plain, ECPoint_v2, BasePowers, BasePowers_plain
+
+// // u32 AC = NG+1
+// // u32 ZG = NG-1
+// struct ModuloConst<ZG, NG, AC>{
+//     u8[ZG] CW_list
+//     field[NG] gp_maxword
+//     field[AC] aux_const
+// }
+
+struct PointDoubleConst<P, P_SQU, ZG, NG, AC> {
+    BigNat<P> P_MODULUS
+    BigNat<P_SQU> P_MODULUS_SQU
+    BigNat<P> P256_a
+    ModuloConst<ZG, NG, AC>[3] MODULO_CONST
+    field shift // should equal 1<<W
+}
+
+struct PointAddConst<P, P_SQU, ZG, NG, AC> {
+    BigNat<P> P_MODULUS
+    BigNat<P_SQU> P_MODULUS_SQU
+    BigNat<P> P256_a
+    ModuloConst<ZG, NG, AC>[4] MODULO_CONST
+    field shift // should equal 1<<W
+}
+
+struct ScalarMultConst<NP, P_SQU, ZG, NG, AC> {
+    PointAddConst<NP, P_SQU, ZG, NG, AC> const_for_pa
+    PointDoubleConst<NP, P_SQU, ZG, NG, AC> const_for_pd
+}
+
+struct VerifyECDSAConstInner<NP, NQ, P_SQU, ZG, NG, AC> {
+    ModuloHelperConst<ZG, NG, AC> const_for_modq
+    ScalarMultConst<NP, P_SQU, ZG, NG, AC> const_for_scalmul
+    BigNat<NQ> Q_MODULUS
+    ECPoint_v2<NP> P256_G
+    // BasePowers<NP, Nm1, S, LS> Gpow
+}
+
+struct VerifyECDSAConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> {
+    ModuloHelperConst<ZG, NG, AC> const_for_modq
+    ScalarMultConst<NP, P_SQU, ZG, NG, AC> const_for_scalmul
+    BigNat<NQ> Q_MODULUS
+    ECPoint_v2<NP> P256_G
+    BasePowers<NP, Nm1, S, LS> Gpow
+}
+
+struct VerifyECDSAConstWindow<NP, NQ, P_SQU, ZG, NG, AC, S> {
+    ModuloHelperConst<ZG, NG, AC> const_for_modq
+    ScalarMultConst<NP, P_SQU, ZG, NG, AC> const_for_scalmul
+    BigNat<NQ> Q_MODULUS
+    ECPoint_v2<NP> P256_G
+    ECPoint_v2<NP>[S] base_powers
+}
+
+// struct VerifyECDSAConstPlain_ori<NP, NP2, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> { // generic changed (Dec 26)
+struct VerifyECDSAConstPlain_ori<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> { // generic changed (Dec 26)
+    ModuloHelperConst<ZG, NG, AC> const_for_modq
+    ScalarMultConst<NP, P_SQU, ZG, NG, AC> const_for_scalmul
+    BigNat<NQ> Q_MODULUS
+    // BigNat<NP2> P_MINUS_Q
+    field P_MINUSQ_MINUS1
+    ECPoint_v2<NP> P256_G
+    // BasePowers<NP, Nm1, S, LS> Gpow
+    BasePowers_plain<NP, Nm1, S, LS> Gpow
+}
+
+struct VerifyECDSAConstPlain<NP, NQ, P_SQU, ZG, NG, AC, S> {
+    ModuloHelperConst<ZG, NG, AC> const_for_modq
+    ScalarMultConst<NP, P_SQU, ZG, NG, AC> const_for_scalmul
+    BigNat<NQ> Q_MODULUS
+    ECPoint_v2<NP> P256_G
+    ECPoint_plain<NP>[S] base_powers
+}
+
+

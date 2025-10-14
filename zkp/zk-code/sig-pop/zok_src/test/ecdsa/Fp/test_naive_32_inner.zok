@@ -1,0 +1,42 @@
+// ECDSA signature verification w/o composite approach nor advanced range checks
+from "../../../ecdsa/const/ecdsaconst_32" import CONST_FOR_ECDSA_INNER, Q_MODULUS, P_MINUSQ_MINUS1
+from "../../../ecdsa/struct/ecdsastruct" import ECPoint, ECPoint_v2, BasePowers_plain
+from "../../../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMult, BigNatMod, BigNatModMultwores_v5, BigNatb_v2, ModuloConst, ModuloHelperConst
+from "../../../ecdsa/struct/ecdsaconststruct" import PointDoubleConst, PointAddConst, ScalarMultConst, VerifyECDSAConstPlain_ori, VerifyECDSAConstInner
+
+from "../../../ecdsa/verifyecdsa_dynamic_stride" import to_ecpoint2
+
+from "../../../ecdsa/Fp/verifyecdsa_naive" import verifyecdsa
+
+from "../../../zok_utils/struct/adv_struct" import BigNat_init, ModuloConstAdv
+from "../../../ecdsa/struct/ecdsa_advstruct" import ECDSACertificate_init, ECDSASign_init, ECDSAIncomplete_init
+from "../../../ecdsa/struct/ecdsaconst_advstruct" import VerifyECDSAConstAdv, ScalarMultConstAdv, PointAddConstAdv, PointDoubleConstAdv, VerifyECDSASigmaConst
+// from "../../../ecdsa/advanced/const/32" import CONST_FOR_MODQ
+from "../../../ecdsa/Fp-estimate/const/32" import CONST_FOR_PA//, G_inv //, Q_MODULUS_FIELD // checked; Only applicable to P256
+from "const_32_p256" import G_inv
+
+from "../../../ecdsa/Fp-estimate/struct/ecdsaFp_struct" import ECDSAFp_public, ECDSACertFpNaive_init_v2, ECPoint_Fp, ECDSAFpNaive_init_v2, ECDSASign_partinit
+
+from "../../../ecdsa/Fp/const/p256/modconst_32" import CONST_FOR_MODQ
+from "../../../ecdsa/Fp-estimate/struct/ecdsaFp_conststruct" import BasePowers_Fp, PointAddConstFp //, VerifyECDSAFpConst
+from "../../../zok_utils/struct/naive_struct" import ModuloConstNaive
+from "../../../ecdsa/Fp/struct/conststruct" import VerifyECDSAFpNaiveConst
+from "../../../ecdsa/Fp/struct/ecdsa_struct" import ECDSACertNaive_Fp_init, ECDSANaive_Fp_init, PointAdd_x_Fp_init
+from "../../../ecdsa/struct/ecdsastruct" import ECDSASignatureb
+
+def verifyecdsa_32<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(ECPoint_Fp issuerkey, ECDSASignatureb<NQ, W> signatureb, BigNatb<NQ, W> digest_resultb, ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> intermediate) -> bool:
+    ECDSACertNaive_Fp_init<NQ, W> cert = ECDSACertNaive_Fp_init {
+                                                signatureb: signatureb,
+                                                issuerkey: issuerkey,
+                                                digest_resultb: digest_resultb
+                                            }                                            
+    VerifyECDSAFpNaiveConst<NQ, ZG, NG, AC> helper_const = VerifyECDSAFpNaiveConst {
+                                                                const_for_modq: CONST_FOR_MODQ, // we can use this as const_for_check_resp because i) each maxword here is no less than each maxword of const_for_check_resp; ii) their quotient_bw is the same
+                                                                const_for_pa: CONST_FOR_PA, 
+                                                                Q_MODULUS: Q_MODULUS, 
+                                                                P_MINUSQ_MINUS1: P_MINUSQ_MINUS1,
+                                                                K_inv: G_inv
+                                                            }                                 
+    assert(verifyecdsa::<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC>(cert, intermediate, helper_const))
+    return true
+

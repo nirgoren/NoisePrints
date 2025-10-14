@@ -1,0 +1,116 @@
+// from "utils" import unsafe_split
+from "EMBED" import unpack, u32_to_bits, u32_to_field
+
+def pack<N>(bool[N] bits) -> field:
+	field out = 0
+	for u32 j in 0..N do
+		u32 i = N - (j + 1)
+		out = out + if bits[i] then (2 ** j) else 0 fi
+	endfor
+    return out
+
+def revpack<N>(bool[N] bits) -> field:
+	field out = 0
+	for u32 j in 0..N do
+		out = out + if bits[j] then (2 ** j) else 0 fi
+	endfor
+    return out
+
+def reverse<N>(bool[N] bits) -> bool[N]:
+    bool[N] out = [false;N]
+    for u32 i in 0..N do
+        out[i] = bits[N-i-1]
+    endfor
+    return out
+
+// Find i, j, k s.t. idx == i * 512 + j * 32 + k * 11
+def idx_to_ijk(u32 idx) -> u32[3]:
+    u32 i = idx / 512
+    u32 j = (idx % 512) / 32
+    u32 k = (idx % 32) / 11
+    assert(idx == i * 512 + j * 32 + (idx % 32))
+    return [i, j, k]
+
+// MIXED_IDX: Index for last significant limb that involves message
+def is_check(u32 i, u32 j, u32 k, u32 MIXED_IDX, u32 LIMBWIDTH) -> bool:
+    u32 CUR_IDX = i * 512 + j * 32 + k * LIMBWIDTH
+    return CUR_IDX > MIXED_IDX
+
+// split a number into high and low bits
+def split<LOW_BITS,HIGH_BITS>(field x) -> field[2]:
+    u32 TOTAL_BITS = LOW_BITS + HIGH_BITS
+    bool[TOTAL_BITS] bits = unpack(x)
+    field low = pack(bits[0..LOW_BITS])
+    field high = pack(bits[LOW_BITS..TOTAL_BITS])
+    return [low, high]
+
+// Naive solution
+def check_mixed_limb(field pad_message, field PAD, u32 IDX) -> bool:
+    u32 LOW_BITS = IDX - 1
+    u32 HIGH_BITS = 32 - LOW_BITS
+    field[2] split_message = split::<LOW_BITS,HIGH_BITS>(pad_message) // cost 32 constraints
+    field[2] split_PAD = split::<LOW_BITS,HIGH_BITS>(PAD)
+    return (split_message[1] == split_PAD[1])
+
+def msg_len_to_padzero_len(u32 MSG_LEN) -> u32:
+    u32 padded_len = MSG_LEN + 1 + 64
+    u32 remainder = padded_len % 512
+    u32 padzero_len = 512 - remainder
+    return padzero_len
+
+
+// N: Number of invocations of sha256 blocks (padded length / 512)
+// NL: Number of limbs (independent of the message length)
+// Not test for message length >= 2^11
+def msg_len_to_pad<N, NL>(u32 MSG_LEN, u32 LIMBWIDTH) -> field[N][16][NL]: // each element has 32 bits
+    u32 PADZERO_LEN = msg_len_to_padzero_len(MSG_LEN)
+    bool[N * 512] result_in_bits = [false; N*512] // last 64 bits corresponds to the message length
+    result_in_bits[MSG_LEN] = true
+    field[N][16][NL] result = [[[0;NL];16];N]
+
+    for u32 i in 0..N do
+        for u32 j in 0..16 do
+            for u32 k in 0..NL do
+                u32 start = if k == 0 then i * 512 + j * 32 else i * 512 + j * 32 + (32%LIMBWIDTH) + (k-1) * LIMBWIDTH fi
+                u32 end = if k == 0 then start + (32%LIMBWIDTH) else start + LIMBWIDTH fi
+                result[i][j][NL-k-1] = pack(result_in_bits[start..end])
+            endfor
+        endfor
+    endfor
+
+    u32 BASE = 1 << LIMBWIDTH
+    u32 REMAIN_MSG_LEN = MSG_LEN
+    for u32 k in 0..NL do
+        result[N-1][15][k] = u32_to_field(REMAIN_MSG_LEN % BASE)
+        REMAIN_MSG_LEN = REMAIN_MSG_LEN / BASE
+    endfor
+
+    return result
+
+
+// M: Message length
+// Check that the padding is correct
+// def check_padding<N, NL>(field[N][16][NL] padded_message, u32 M, field[N][16][NL] PAD, u32 LIMBWIDTH) -> bool:
+    // field[N][16][NL] PAD_COMP = msg_len_to_pad::<N, NL>(M, LIMBWIDTH)
+def check_padding<N, NL>(field[N][16][NL] padded_message, u32 M, u32 LIMBWIDTH) -> bool:
+    field[N][16][NL] PAD = msg_len_to_pad::<N, NL>(M, LIMBWIDTH)
+
+    for u32 i in 0..N do
+        for u32 j in 0..16 do
+            for u32 k in 0..NL do
+                bool IS_CHECK = is_check(i, j, k, M-1, LIMBWIDTH)
+                assert(!IS_CHECK || padded_message[i][j][k] == PAD[i][j][k])
+            endfor
+        endfor
+    endfor
+
+    // // Compute the idx corresponding to limb that involve both the message and the padding
+    // u32[3] MIXED_IDX = idx_to_ijk(M-1)
+    // u32 I = MIXED_IDX[0]
+    // u32 J = MIXED_IDX[1]
+    // u32 K = MIXED_IDX[2]
+    bool IS_NOT_MIXED = (M % 32 == 0) || (M % 32 == LIMBWIDTH) || (M % 32 == 2*LIMBWIDTH)
+    // u32 SPLIT_IDX = (M % 32) / 11
+    assert(IS_NOT_MIXED)
+    // assert(IS_NOT_MIXED || check_mixed_limb(padded_message[I][J][K], PAD[I][J][K], SPLIT_IDX))
+    return true

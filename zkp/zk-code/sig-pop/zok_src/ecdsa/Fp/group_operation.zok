@@ -1,0 +1,26 @@
+from "../Fp-estimate/group_operation" import to_ecpoint_v2_Fp, incomplete_point_add_v2
+from "../../zok_utils/big_nat" import BigNat, BigNatb
+from "../Fp-estimate/struct/ecdsaFp_struct" import ECPoint_Fp, ECPoint_v2_Fp, PointAdd_x_Fp_init, PointAdd_x_Fp
+from "../Fp-estimate/struct/ecdsaFp_conststruct" import PointAddConstFp
+from "struct/ecdsa_struct" import ScalarMult
+
+def point_double(ECPoint_v2_Fp pt, field m, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    // field m = (3 * pt.x * pt.x + helper_const.curvea)
+    assert((3 * pt.x * pt.x + helper_const.curvea) == m * 2 * pt.y)
+    // field m = (3 * pt.x * pt.x + helper_const.curvea) / (2 * pt.y)
+    field x3 = m*m - 2*pt.x
+    field y3 = m*(pt.x - x3) - pt.y
+    return ECPoint_v2_Fp{x: x3, y: y3, empty: pt.empty}
+
+def scalar_mult<W, NQ>(bool is_k_equal_q, BigNatb<NQ, W> k, ECPoint_Fp pt, ScalarMult<NQ, W> intermediate, PointAddConstFp helper_const) -> ECPoint_v2_Fp:
+    ECPoint_v2_Fp addend = to_ecpoint_v2_Fp(pt, false)
+    ECPoint_v2_Fp result = ECPoint_v2_Fp{x: 0, y: 0, empty: true}// to_ecpoint_v2_Fp(pt, true)
+
+    for u32 j in 0..NQ do
+        for u32 i in 0..W do
+            result = if k.limbs[j][W-i-1] then incomplete_point_add_v2(result, addend) else result fi // iterate from the least significant bit
+            addend = point_double(addend, intermediate.mm_for_double[j][i], helper_const) // if pt is not identity point, addend will never be identity point since 2^n mod q != 0 for any positive integer n
+        endfor
+    endfor
+    result.empty = is_k_equal_q
+    return result

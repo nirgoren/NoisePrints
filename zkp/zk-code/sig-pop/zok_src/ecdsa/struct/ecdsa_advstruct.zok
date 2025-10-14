@@ -1,0 +1,159 @@
+from "../../zok_utils/big_nat" import BigNat //, BigNatb, BigNatMod, BigNatb_v2, BigNatModMultwores_v5
+from "../../zok_utils/struct/adv_struct" import BigNat_init, BigNatModMult_wores_adv, BigNatModMultadv, BigNatModMult_init, BigNatModMult, BigNatModMult_wores, BigNatModMultwores_init
+from "ecdsastruct" import ECPoint, ECPoint_v2
+
+// corresponding to ECDSASignatureb
+struct ECDSASign_init<N, Lp1> { // N = number of limbs
+    BigNat_init<N, Lp1> r
+    BigNat_init<N, Lp1> s
+}
+
+// corresponding to PointAdd3
+struct PointAdd_init<P, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNat<Z>[7] products
+    BigNatModMult_init<P, Z, V, Qm1, Lp1, ZG, CL>[4] intermediate_mod
+}
+
+struct PointAdd<P, Z, V, Q, ZG> { // be careful of the generics
+    BigNat<Z>[7] products
+    BigNatModMult<P, Z, V, Q, ZG>[4] intermediate_mod
+}
+
+struct IncompletePointAdd_init<P, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatModMult_init<P, Z, V, Qm1, Lp1, ZG, CL>[3] intermediate_mod
+}
+
+struct IncompletePointAdd<P, Z, V, Q, ZG> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatModMult<P, Z, V, Q, ZG>[3] intermediate_mod
+}
+
+// corresponding to PointDouble
+struct PointDouble_init<P, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNat<Z>[5] products
+    // BigNatb<P, W>[3] remainders
+    BigNatModMult_init<P, Z, V, Qm1, Lp1, ZG, CL>[3] intermediate_mod
+}
+
+
+struct PointDouble<P, Z, V, Q, ZG> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatModMult<P, Z, V, Q, ZG>[3] intermediate_mod
+}
+
+// corresponding to PointAdd_x from zok_src/ecdsa/struct/ecdsastruct.zok
+// check if x-coordinate of pt1+pt2 equals r in Fq
+struct PointAdd_x_init<P, Z, V, Qm1, Lp1, ZG, CL, CRL> { // be careful of the generics
+    BigNat<Z>[5] products
+    // BigNatb<P, W>[2] remainders
+    BigNatModMult_init<P, Z, V, Qm1, Lp1, ZG, CL>[2] intermediate_mod
+    BigNatModMult_wores_adv<Z, V, Qm1, Lp1, ZG, CL> last_intermediate
+    field[CRL] carry_r
+}
+
+// check if x-coordinate of pt1+pt2 equals r in Fq
+struct PointAdd_x_checked<P, Z, V, Q, ZG> { // be careful of the generics
+    BigNat<Z>[5] products
+    BigNatModMult<P, Z, V, Q, ZG>[2] intermediate_mod
+    BigNatModMult_wores<Z, V, Q, ZG> last_intermediate
+    bool quotient_r
+}
+
+// corresponding to ScalarMult
+struct ScalarMult_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL> {
+    PointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[NQ][W] mm_for_pa // include NQ because of `b`
+    PointDouble_init<NP, Z, V, Qm1, Lp1, ZG, CL>[NQ][W] mm_for_pd
+}
+
+// corresponding to BigNatECDSA_v7
+struct ECDSA_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> { // with cached window method for a*G
+    BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_a // result = a = H(m)/s
+    BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_b // result = b = r/s
+    PointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul_a // P, Z, V, Qm1, Lp1, ZG, CL
+    ScalarMult_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL> scalarmul_b 
+    // ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+    PointAdd_x_init<NP, Z, V, Qm1, Lp1, ZG, CL, CRL> mm_for_u_hat
+    // PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct ECDSAIncomplete_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> { // with cached window method for a*G
+    BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_a // result = a = H(m)/s
+    BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_b // result = b = r/s
+    IncompletePointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul_a // P, Z, V, Qm1, Lp1, ZG, CL
+    // PointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul_a // P, Z, V, Qm1, Lp1, ZG, CL
+    ScalarMult_init<W, NQ, NP, Z, V, Qm1, Lp1, ZG, CL> scalarmul_b 
+    // ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+    PointAdd_x_init<NP, Z, V, Qm1, Lp1, ZG, CL, CRL> mm_for_u_hat
+    // PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+}
+
+struct ECDSACertificate_init<P, Q, Lp1> {
+    ECDSASign_init<Q, Lp1> signature_init
+    ECPoint_v2<P> issuerkey
+    BigNat_init<P, Lp1> digest_result_init
+}
+
+struct ECDSACertificate_init_w_hash<P, Q, Lp1> {
+    ECDSASign_init<Q, Lp1> signature_init
+    ECPoint_v2<P> issuerkey
+    BigNat<P> digest_result
+}
+
+
+// struct ECDSACertificate_v2_hash_32<P, Q, N, W> { // W = 32
+//     ECDSASignatureb<Q, W> signatureb
+//     ECPoint_v2<P> issuerkey // private
+//     u32[P] digest_result
+// }
+
+// struct PointAdd_x<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+//     BigNat<Z>[5] products
+//     BigNatb<P, W>[2] remainders
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+//     field carry_r
+// }
+
+// struct PointAdd4<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+//     BigNat<Z>[5] products
+//     BigNatb<P, W>[2] remainders
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+//     bool quotient_r
+// }
+
+
+// struct PointDouble3<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+//     BigNat<Z>[5] products
+//     BigNatb<P, W>[3] remainders
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[3] intermediate_mod // last limb of quotient has W2 bits
+// }
+
+// struct ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW> {
+//     PointAdd3<W, W2, NP, Z, V, Qm1, CW>[NQ][W] mm_for_pa
+//     PointDouble3<W, W2, NP, Z, V, Qm1, CW>[NQ][W] mm_for_pd
+// }
+
+// struct PointAdd3<W, W2, P, Z, V, Qm1, CW> { // be careful of the generics
+//     BigNat<Z>[7] products
+//     BigNatb<P, W>[4] remainders
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW>[4] intermediate_mod // last limb of quotient has W2 bits
+// }
+
+// struct BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> { // be careful of the generics
+//     BigNat<Z> z
+//     BigNat<V> v
+//     BigNatb_v2<Qm1, W, W2> quotientb
+//     bool[CW] carry
+// }
+
+// struct BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> { // with cached window method for a*G
+//     BigNatb<NQ, W> a
+//     BigNatb<NQ, W> b
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_a
+//     BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_b
+//     PointAdd3<W, W2, NP, Z, V, Qm1, CW2>[PA] scalarmul_a
+//     // ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW2> scalarmul_a
+//     ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW2> scalarmul_b
+//     PointAdd4<W, W2, NP, Z, V, Qm1, CW2> mm_for_u_hat
+// }
+

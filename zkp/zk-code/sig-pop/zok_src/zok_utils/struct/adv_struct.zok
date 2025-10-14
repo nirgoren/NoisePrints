@@ -1,0 +1,88 @@
+from "../../zok_utils/big_nat" import BigNat
+
+struct BigNat_init<N, Lp1> {
+    field[N][Lp1] limbs
+}
+
+struct BigNat_init_quotient<Qm1, Lp1> { // quotient requires 2049 = 32*64+1 bits
+    field[Qm1][Lp1] limbs
+    field last_limb // only require 1 bit
+}
+
+// corresponding to BigNatModMultwores_v5
+struct BigNatModMult_wores_adv<Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    // BigNat<Z> z // no need for checking u hat
+    BigNat<V> v
+    BigNat_init_quotient<Qm1, Lp1> quotient_init
+    BigNat_init<ZG, CL> carry_init
+    // BigNat_init<A, Lp1> res
+}
+
+struct BigNatModMultadv<A, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNat<Z> z
+    BigNat<V> v
+    BigNat_init_quotient<Qm1, Lp1> quotient_init
+    // field[ZG] carry
+    BigNat_init<ZG, CL> carry_init
+    BigNat_init<A, Lp1> res_init
+}
+
+struct BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNat<Z> z
+    BigNat<V> v
+    BigNat_init_quotient<Qm1, Lp1> quotient_init
+    BigNat_init<ZG, CL> carry_init
+}
+
+struct BigNatModMultwores<Z, V, Q, ZG> { // be careful of the generics
+    BigNat<Z> z
+    BigNat<V> v
+    BigNat<Q> quotient
+    BigNat<ZG> carry
+}
+
+// Same as BigNatModMultadv except for the names change
+// corresponding to BigNatModMultwores_v5
+struct BigNatModMult_init<A, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    // BigNat<Z> z // no need for point addition nor point double
+    BigNat<V> v
+    BigNat_init_quotient<Qm1, Lp1> quotient_init
+    // field[ZG] carry
+    BigNat_init<ZG, CL> carry_init
+    BigNat_init<A, Lp1> res_init
+}
+
+
+struct BigNatModMult<A, Z, V, Q, ZG> { // be careful of the generics
+    // BigNat<Z> z // no need for point addition or point double
+    BigNat<V> v
+    BigNat<Q> quotient
+    BigNat<ZG> carry
+    BigNat<A> res
+}
+
+struct BigNatModMult_wores<Z, V, Q, ZG> { // be careful of the generics
+    // BigNat<Z> z
+    BigNat<V> v
+    BigNat<Q> quotient
+    BigNat<ZG> carry
+}
+
+struct BigNatRSAadv<A, Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+    BigNatModMultadv<A, Z, V, Qm1, Lp1, ZG, CL>[16] mm // 17 = E-1
+    BigNat<Z> z // for the last modular multiplication
+    BigNat<V> v // for the last modular multiplication
+    BigNat_init_quotient<Qm1, Lp1> quotient_init // for the last modular multiplication
+    // field[ZG] carry // for the last modular multiplication
+    BigNat_init<ZG, CL> carry_init
+}
+
+/// define structures related to constant
+
+// corresponding to ModuloConst from "zok_src/zok_utils/big_nat"
+struct ModuloConstAdv<ZG, NG, AC>{
+    // u8[ZG] CW_list
+    field[NG] gp_maxword
+    field[AC] aux_const
+    u32 quotient_bw // bitwidth of last limb of quotient
+}

@@ -1,0 +1,248 @@
+//! Export circ R1cs to Spartan
+use crate::target::r1cs::*;
+// use bincode::{deserialize_from, serialize_into};
+use curve25519_dalek::scalar::Scalar;
+// use fxhash::FxHashMap as HashMap;
+use gmp_mpfr_sys::gmp::limb_t;
+use libdorian::{Assignment, InputsAssignment, Instance, NIZKGens, VarsAssignment, NIZK};
+use merlin::Transcript;
+use rug::Integer;
+use std::io;
+use super::utils::{Variable};
+
+use std::time::Instant;
+use crate::util::timer::print_time;
+
+use lazy_static::lazy_static;
+
+use super::spartan::SpartanProofSystem;
+
+
+lazy_static! {
+    /// Order of Curve25519
+    pub static ref MOD_CURVE25519: Integer = Integer::from_str_radix("7237005577332262213973186563042994240857116359379907606001950938285454250989", 10).unwrap();
+}
+
+pub struct SpartanCurve25519;
+
+impl SpartanProofSystem for SpartanCurve25519 {
+    type VerifierKey = VerifierData;
+    type ProverKey = ProverDataSpartan;
+    type SetupParameter = (NIZKGens, Instance);
+    type Proof = NIZK;
+
+    fn prove(
+        pp: &Self::SetupParameter,
+        pk: &Self::ProverKey,
+        input_map: &HashMap<String, Value>,
+    ) -> io::Result<Self::Proof> {
+        prove(pk, &pp.0, &pp.1, input_map)
+    }
+
+    fn verify(
+        pp: &Self::SetupParameter,
+        vk: &Self::VerifierKey,
+        inputs_map: &HashMap<String, Value>,
+        proof: &Self::Proof,
+    ) -> io::Result<()> {
+        let values = vk.eval(inputs_map);
+        verify(&values, &pp.0, &pp.1, proof)
+    }
+}
+
+/// generate spartan proof
+pub fn prove(
+    prover_data: &ProverDataSpartan,    
+    gens: &NIZKGens,
+    inst: &Instance,
+    inputs_map: &HashMap<String, Value>,
+) -> io::Result<NIZK> {
+    let print_msg = true;
+    let start = Instant::now();
+    let (wit, inps) =
+        r1cs_to_spartan_simpl(prover_data, inst, inputs_map);
+
+    print_time("Time for r1cs_to_spartan", start.elapsed(), print_msg);
+
+
+    // produce proof
+    let start = Instant::now();
+    let mut prover_transcript = Transcript::new(b"nizk_example");
+    let pf = NIZK::prove(inst, wit, &inps, gens, &mut prover_transcript);
+    print_time("Time for NIZK::prove", start.elapsed(), print_msg);
+
+    Ok(pf)
+}
+
+
+/// verify spartan proof
+pub fn verify(
+    values: &Vec<FieldV>,
+    gens: &NIZKGens,
+    inst: &Instance,
+    proof: &NIZK,
+) -> io::Result<()> {
+    let print_msg = true;
+    let start = Instant::now();
+
+    let mut inp = Vec::new();
+    for v in values {
+        let scalar = int_to_scalar(&v.i());
+        inp.push(scalar.to_bytes());
+    }
+    let inputs = InputsAssignment::new(&inp).unwrap();
+    print_time("Time for Process verifier input -- transforming inputs to appropriate form", start.elapsed(), print_msg);
+
+    // println!("Verifying with Spartan");
+    let start = Instant::now();
+    let mut verifier_transcript = Transcript::new(b"nizk_example");
+    assert!(proof
+        .verify(inst, &inputs, &mut verifier_transcript, gens)
+        .is_ok());
+    print_time("Time for NIZK::verify", start.elapsed(), print_msg);
+
+    // println!("Proof Verification Successful!");
+    Ok(())
+}
+
+/// circ R1cs -> spartan R1CSInstance
+pub fn precompute(
+    prover_data: &ProverData,
+// ) {
+) -> io::Result<(NIZKGens, Instance)> {
+    // spartan format mapper: CirC -> Spartan
+    let mut trans: HashMap<Var, usize> = HashMap::default(); // Circ -> spartan ids
+    let mut id = 0;
+    for var in prover_data.r1cs.vars.iter() {
+        assert!(matches!(var.ty(), VarType::Inst | VarType::FinalWit));
+        if let VarType::FinalWit = var.ty() {
+            trans.insert(*var, id);
+            id += 1;
+        }
+    }
+    let num_wit = id;
+    let num_inp = prover_data.r1cs.vars.len()-id;
+    id += 1;
+    for var in prover_data.r1cs.vars.iter() {
+        assert!(matches!(var.ty(), VarType::Inst | VarType::FinalWit));
+        if let VarType::Inst = var.ty() {
+            trans.insert(*var, id);
+            id += 1;
+        }
+    }
+    assert!(id == prover_data.r1cs.vars.len() + 1);
+    let const_id = num_wit;
+
+    let mut m_a: Vec<(usize, usize, [u8; 32])> = Vec::new();
+    let mut m_b: Vec<(usize, usize, [u8; 32])> = Vec::new();
+    let mut m_c: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+    let mut i = 0; // constraint #
+    for (lc_a, lc_b, lc_c) in prover_data.r1cs.constraints.iter() {
+        // circ Lc (const, monomials <Integer>) -> Vec<Variable>
+        let a = lc_to_v(lc_a, const_id, &trans);
+        let b = lc_to_v(lc_b, const_id, &trans);
+        let c = lc_to_v(lc_c, const_id, &trans);
+
+        // constraint # x identifier (vars, 1, inp)
+        for Variable { sid, value } in a {
+            m_a.push((i, sid, value));
+        }
+        for Variable { sid, value } in b {
+            m_b.push((i, sid, value));
+        }
+        for Variable { sid, value } in c {
+            m_c.push((i, sid, value));
+        }
+
+        i += 1;
+    }
+
+    let num_cons = i;
+    assert_ne!(num_cons, 0, "No constraints");
+
+    let inst = Instance::new(num_cons, num_wit, num_inp, &m_a, &m_b, &m_c).unwrap();
+    let gens = NIZKGens::new(num_cons, num_wit, num_inp);
+    Ok((gens, inst))
+}
+
+/// circ R1cs -> spartan R1CSInstance
+pub fn r1cs_to_spartan_simpl(
+    prover_data: &ProverDataSpartan,
+    inst: &Instance,
+    inputs_map: &HashMap<String, Value>,
+) -> (Assignment, Assignment) {
+    // spartan format mapper: CirC -> Spartan
+    let mut wit = Vec::new();
+    let mut inp = Vec::new();
+
+    let values = prover_data.extend_r1cs_witness(inputs_map);
+    // prover_data.r1cs.check_all(&values); // for debug purpose
+    let var_len = prover_data.pubinp_len + prover_data.wit_len;
+    assert_eq!(values.len(), var_len);
+
+    for val in values.iter().take(prover_data.pubinp_len) {
+        inp.push(int_to_scalar(&val.i()).to_bytes());
+    }
+
+    for val in values.iter().skip(prover_data.pubinp_len) {
+        wit.push(int_to_scalar(&val.i()).to_bytes());
+    }
+
+    let assn_witness = VarsAssignment::new(&wit).unwrap();
+    let assn_inputs = InputsAssignment::new(&inp).unwrap();
+
+    // check if the instance we created is satisfiable
+    let res = inst.is_sat(&assn_witness, &assn_inputs); // for debug only
+    assert!(res.unwrap());
+
+    (
+        assn_witness,
+        assn_inputs,
+    )
+}
+
+
+/// Integer to scalar
+pub fn int_to_scalar(i: &Integer) -> Scalar {
+    let mut accumulator = Scalar::ZERO;
+    let limb_bits = (std::mem::size_of::<limb_t>() as u64) << 3;
+    assert_eq!(limb_bits, 64);
+
+    let two: u64 = 2;
+    let mut m = Scalar::from(two.pow(63));
+    m *= Scalar::from(two);
+
+    // as_ref yeilds a least-significant-first array.
+    for digit in i.as_ref().iter().rev() {
+        accumulator *= m;
+        accumulator += Scalar::from(*digit);
+    }
+    accumulator
+}
+
+/// circ Lc (const, monomials <Integer>) -> Vec<Variable>
+pub fn lc_to_v(lc: &Lc, const_id: usize, trans: &HashMap<Var, usize>) -> Vec<Variable> {
+    let mut v: Vec<Variable> = Vec::new();
+
+    for (k, m) in &lc.monomials {
+        let scalar = int_to_scalar(&m.i());
+
+        let var = Variable {
+            sid: *trans.get(k).unwrap(),
+            value: scalar.to_bytes(),
+        };
+        v.push(var);
+    }
+    if lc.constant.i() != 0 {
+        let scalar = int_to_scalar(&lc.constant.i());
+        let var = Variable {
+            sid: const_id,
+            value: scalar.to_bytes(),
+        };
+        v.push(var);
+    }
+    v
+}
+
+

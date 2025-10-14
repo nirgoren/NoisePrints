@@ -1,0 +1,44 @@
+[project]
+name = "seed-watermark"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Nir Goren", email = "nir@gorenor.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate>=1.9.0",
+    "datasets>=4.0.0",
+    "diffusers>=0.34.0",
+    "gradio>=3.36.1",
+    "matplotlib>=3.10.3",
+    "numpy==1.26.0",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.3.1",
+    "peft>=0.17.0",
+    "pillow>=11.3.0",
+    "protobuf>=6.31.1",
+    "pyyaml>=6.0.1",
+    "scipy>=1.10,<1.12",
+    "seaborn>=0.13.2",
+    "sentencepiece>=0.2.0",
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "transformers>=4.29.2",
+    "galois==0.4.1",
+    "ldpc==0.1.51",
+    "lpips>=0.1.4",
+    "ftfy>=6.3.1",
+]
+
+[project.scripts]
+seed-watermark = "seed_watermark.cli:main"
+generate = "seed_watermark.cli:generate"
+analyze = "seed_watermark.cli:analyze"
+analyze-signs = "seed_watermark.cli:analyze_signs"
+corruption-comparison = "seed_watermark.utils.generate_corruption_comparison:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

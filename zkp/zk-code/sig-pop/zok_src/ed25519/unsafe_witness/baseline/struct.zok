@@ -1,0 +1,44 @@
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, UncheckedBigNat, check_bignat_w_bitlen, integer_to_bignat, bignat_to_integer, bignat_equal
+from "../../../zok_utils/unsafe_witness/util" import ceildiv
+
+struct Point<P> {
+    BigNat<P> x
+    BigNat<P> y
+}
+
+struct UncheckedPoint<P> {
+    UncheckedBigNat<P> x
+    UncheckedBigNat<P> y
+}
+
+def mod_wrap(u32 val, u32 mod) -> u32:
+    return (val % mod + mod - 1) % mod + 1
+    
+
+struct BasePowers<N,LW,STRIDE> {
+    field[ceildiv(N*LW, STRIDE) - 1][1 << STRIDE][2][N] base_powers
+    field[1 << (mod_wrap(N*LW, STRIDE))][2][N] last_base_powers
+}
+
+def integers_to_point<P,LW>(integer[2] coords) -> Point<P>:
+    return Point {
+        x: integer_to_bignat::<P,LW>(coords[0]),
+        y: integer_to_bignat::<P,LW>(coords[1])
+    }
+
+def point_to_integers<P>(Point<P> p) -> integer[2]:
+    return [bignat_to_integer(p.x), bignat_to_integer(p.y)]
+
+
+def check_point<P,WORDSIZE>(UncheckedPoint<P> p, u32 LW) -> Point<P>:
+    return Point {
+        x: check_bignat_w_bitlen::<P,WORDSIZE>(p.x, LW, 255),
+        y: check_bignat_w_bitlen::<P,WORDSIZE>(p.y, LW, 255)
+    }
+
+def point_equal<P>(Point<P> p1, Point<P> p2) -> bool:
+    return bignat_equal::<P>(p1.x, p2.x) && bignat_equal::<P>(p1.y, p2.y)
+
+def main(Point<8> p, Point<8> q) -> bool:
+    assert(point_equal::<8>(p,q))
+    return true

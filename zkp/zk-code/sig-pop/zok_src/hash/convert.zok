@@ -1,0 +1,41 @@
+from "../zok_utils/big_nat" import BigNat
+from "EMBED" import u16_to_field, u32_to_field, u64_to_field
+
+def u32vec_to_bignat(u32[8] digest_result) -> BigNat<8>:
+    BigNat<8> res = BigNat {limbs: [0; 8]}
+    for u32 i in 0..8 do
+        res.limbs[8-1-i] = u32_to_field(digest_result[i])
+    endfor
+    return res
+
+// limbwidth = 64
+def u32vec_to_bignat_64(u32[8] digest_result) -> BigNat<4>:
+    BigNat<4> res = BigNat {limbs: [0; 4]}
+    field base = 4294967296 // 1<<32
+    for u32 i in 0..4 do
+        res.limbs[4-1-i] = u32_to_field(digest_result[2*i+1]) + u32_to_field(digest_result[2*i]) * base
+    endfor
+    return res
+
+def u64vec_to_bignat(u64[4] digest_result) -> BigNat<4>:
+    BigNat<4> res = BigNat {limbs: [0; 4]}
+    for u32 i in 0..4 do
+        res.limbs[i] = u64_to_field(digest_result[i])
+    endfor
+    return res
+
+def u32vec_to_bignat_in_order<P>(u32[P] digest_result) -> BigNat<P>:
+    BigNat<P> res = BigNat {limbs: [0; P]}
+    for u32 i in 0..P do
+        res.limbs[i] = u32_to_field(digest_result[i])
+    endfor
+    return res
+
+def u16vec_to_bignat<P>(u16[P] digest_result) -> BigNat<P>:
+    BigNat<P> res = BigNat {limbs: [0; P]}
+    for u32 i in 0..P do
+        res.limbs[i] = u16_to_field(digest_result[i])
+    endfor
+    return res
+
+// limbwidth = 16

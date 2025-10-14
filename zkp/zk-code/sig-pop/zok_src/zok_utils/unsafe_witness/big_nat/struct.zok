@@ -1,0 +1,161 @@
+from "EMBED" import int_size, FIELD_MODULUS,unpack
+from "../util" import zero_pad_field, zero_pad_integer, bool_to_field, ceildiv, maxi,max
+from "../range_check" import range_check_pow2_bound
+//import "utils/casts/field_to_integereger"
+//import "utils/casts/integer_to_field"
+from "EMBED" import integer_to_field, field_to_integer
+
+
+struct BigNatParams<N> {
+    integer[N] max_limbs
+    u32 limbwidth
+}
+
+struct BigNat<N> {
+    field[N] limbs
+    integer value
+    BigNatParams<N> params
+}
+
+struct UncheckedBigNat<N> {
+    field[N] limbs
+}
+
+def limbs_to_integer<N>(field[N] limbs, u32 limbwidth) -> integer:
+    integer output = 0
+    for u32 i in 0..N do
+        output = output + field_to_integer(limbs[i]) * 2**(limbwidth * i)
+    endfor
+    return output
+
+
+
+def new_bignat<N>(field[N] limbs, u32 limbwidth) -> BigNat<N>:
+    return BigNat {
+        limbs: limbs,
+        value: limbs_to_integer::<N>(limbs, limbwidth),
+        params: BigNatParams {
+            max_limbs: [2**limbwidth - 1; N],
+            limbwidth: limbwidth
+        }
+    }
+
+// if bitlen % wordsize != 0, we can set the last max_limb to be less than 2**limbwidth
+// Whether this ultimately actually matters depends on the wordsize
+def new_bignat_w_bitlen<N>(field[N] limbs, u32 limbwidth, u32 bitlen) -> BigNat<N>:
+    //return new_bignat(limbs, limbwidth)
+    u32 NZ_LIMBS = ceildiv(bitlen, limbwidth)
+    assert(N != 0, "somehow we got a bignat with 0 limbs, something is wrong")
+    assert(NZ_LIMBS <= N, "not enough limbs for specified bitlen")
+    u32 LAST_LIM_WIDTH = if bitlen % limbwidth == 0 then limbwidth else bitlen % limbwidth fi
+    integer[N] max_limbs = if bitlen == 0 then [0; N] else [...[2**limbwidth - 1; NZ_LIMBS-1], 2**LAST_LIM_WIDTH-1, ...[0; N-NZ_LIMBS]] fi
+    return BigNat {
+        limbs: limbs,
+        value: limbs_to_integer::<N>(limbs, limbwidth),
+        params: BigNatParams {
+            max_limbs: max_limbs,
+            limbwidth: limbwidth
+        }
+    }
+
+
+def range_check_bignat<N,WORDSIZE>(BigNat<N> b) -> BigNat<N>:
+    for u32 i in 0..N do
+        assert(b.params.max_limbs[i] < FIELD_MODULUS, "attempted a range check, but max_limb larger than field modulus")
+        u32 LW = int_size(b.params.max_limbs[i])
+        // we might not necessarily exactly check that b.params.max_limbs[i] < 2**LW,
+        // the wordsize might induce a bit of slack, so we overwrite the max_limbs entry
+        b.params.max_limbs[i] = range_check_pow2_bound::<LW,WORDSIZE>(b.limbs[i])
+    endfor
+    return b
+
+
+def check_bignat<N,WORDSIZE>(UncheckedBigNat<N> input, u32 limbwidth) -> BigNat<N>:
+    BigNat<N> output = new_bignat(input.limbs, limbwidth)
+    return range_check_bignat::<N,WORDSIZE>(output)
+
+def check_bignat_w_bitlen<N,WORDSIZE>(UncheckedBigNat<N> input, u32 limbwidth, u32 bitlen) -> BigNat<N>:
+    BigNat<N> output = new_bignat_w_bitlen(input.limbs, limbwidth, bitlen)
+    return range_check_bignat::<N,WORDSIZE>(output)
+
+def extend_bignat<A,B>(BigNat<A> a) -> BigNat<B>:
+    assert(B >= A)
+    return BigNat {
+        limbs: zero_pad_field::<A,B>(a.limbs),
+        value: a.value,
+        params: BigNatParams {
+            max_limbs: zero_pad_integer::<A,B>(a.params.max_limbs),
+            limbwidth: a.params.limbwidth
+        }
+    }
+
+
+def integer_to_unchecked<N>(integer a, u32 limbwidth) -> UncheckedBigNat<N>:
+    field[N] limbs = [0; N]
+    integer val = 2 ** limbwidth
+    for u32 i in 0..N do
+        limbs[i] = integer_to_field(a % val)
+        a = if (a == 0) then a else a / val fi
+    endfor
+    return UncheckedBigNat { limbs: limbs } 
+
+
+def integer_to_bignat<N,W>(integer a) -> BigNat<N>:
+    field[N] limbs = integer_to_unchecked::<N>(a, W).limbs
+    u32 bitlen = int_size(a)
+    return new_bignat_w_bitlen::<N>(limbs, W, bitlen)
+
+// can't do a == b if a and b aren't const because they contain integers
+def bignat_equal<N>(BigNat<N> a, BigNat<N> b) -> bool:
+    return a.limbs == b.limbs
+
+def bignat_to_integer<N>(BigNat<N> bn) -> integer:
+    return bn.value
+    //return limbs_to_integer::<N>(bn.limbs, bn.params.limbwidth)
+
+def bits_to_bignat<B,N,W>(bool[B] bits) -> BigNat<N>:
+    assert(B <= N*W)
+    field[N] limbs = [0; N]
+    bool[N*W] exp_bits = [...bits, ...[false; N*W-B]]
+    
+    for u32 i in 0..N do
+        field limb = 0
+        field shift = 1
+        for u32 j in 0..W do
+            limb = limb + shift * bool_to_field(exp_bits[i*W+j])
+            shift = shift * 2
+        endfor
+        limbs[i] = limb
+    endfor
+    return new_bignat_w_bitlen::<N>(limbs, W, B)
+
+
+def bits_to_bignat_exact<N,W>(bool[N*W] bits) -> BigNat<N>:
+    u32 B = N * W
+    return bits_to_bignat::<B,N,W>(bits)
+
+
+def bignat_to_bits<N,W>(BigNat<N> b) -> bool[N*W]:
+    assert(b.params.limbwidth == W)
+    bool[N*W] output = [false; N*W]
+    for u32 i in 0..N do
+        bool[W] be_bits = unpack(b.limbs[i])
+        for u32 j in 0..W do
+            output[W*i+j] = be_bits[W-1-j]
+        endfor
+    endfor
+    return output
+
+
+// returns maximum value a BigNat could represent 
+// could probably just stick an integer term in the BigNatParams struct but whatever
+def bignat_max_value<N>(BigNatParams<N> a) -> integer:
+    integer output = 0
+    for u32 i in 0..N do
+        output = output + a.max_limbs[i] * 2**(a.limbwidth * i)
+    endfor
+    return output
+    
+
+def main(BigNat<10> b) -> bool:
+    return true

@@ -1,0 +1,85 @@
+from "big_nat" import BigNatb_v2, BigNatb, BigNat, GpBigNats, BigNatModMult_v5 // BigNatModMult, BigNatModMult_v2, BigNatModMult_v4,
+from "../rsa/rsastruct" import BigNatRSA_v5 // BigNatRSA, BigNatRSA_v2, BigNatRSA_v4, BigNatRSA_v5
+from "modulomultiply" import checkmultiply, group_limbs, addition
+from "EMBED" import u8_to_u32
+
+from "struct/adv_struct" import BigNatRSAadv, BigNatModMultadv, BigNat_init_quotient, BigNat_init
+from "range_check" import assert_well_formed, adv_rangecheck, assert_well_formed_for_special_form
+
+from "../rsa/const/32_adv" import D_2048
+
+
+// assume left and right have the same number of groups at this moment
+// GW = limbwidth after grouping
+// AC should equal NG+1
+//NGm1 is not useful in this case
+// def equal_when_carried_regroup<NG, GW, NGm1, CW, AC>(BigNat<NG> left, BigNat<NG> right, bool[CW] carry, field[NG] gp_maxword, field[AC] aux_const, u8[NGm1] CW_list) -> bool:
+def equal_when_carried_regroup<NG, GW, ZG, AC>(BigNat<NG> left, BigNat<NG> right, BigNat<ZG> carry, field[NG] gp_maxword, field[AC] aux_const) -> bool:
+    field target_base = 2 ** GW
+    field carry_in = 0
+    for u32 i in 0..ZG do
+       field carry_cur = carry_in
+        carry_in = carry.limbs[i]
+       assert(left.limbs[i] + carry_cur + gp_maxword[i] - carry_in*target_base - right.limbs[i] == aux_const[i])
+    endfor
+    // check last limb of carry equal last limb of aux_const
+    assert(left.limbs[ZG] + carry_in + gp_maxword[ZG] - aux_const[NG]*target_base - right.limbs[ZG] == aux_const[ZG])
+    return true
+
+// NG: number of groups
+// ZG should be NG-1
+// AC should be NG+1
+// mod multiply that includes group limbs
+// Assume V > Z
+def simplemodmultiply<W, A, B, P, Z, V, Q, R, ZG, NG, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<R> remainder, BigNat<V> v, BigNat<Q> quotient, BigNat<ZG> carry, field[NG] gp_maxword, field[AC] aux_const) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    assert(W == 32)
+    assert(checkmultiply::<A, B, Z>(a, b, z)) // a*b = z // Z = 64*2-1 = 127
+    assert(checkmultiply::<Q, P, V>(quotient, modulus, v)) // quotient*modulus = v // Q=65; P=64; V=128
+    BigNat<V> z_right = addition::<V, R>(v, remainder)
+    BigNat<V> z_left = BigNat {limbs: [...z.limbs, ...[0; V-Z]]}
+    GpBigNats<NG> gpres = group_limbs::<V, W, NG>(z_left, z_right)
+    u32 limbs_per_gp = (V-1)/NG + 1
+    assert((V-1)/NG + 1 == (Z-1)/NG + 1)
+    u32 GW = W * limbs_per_gp
+    return equal_when_carried_regroup::<NG, GW, ZG, AC>(gpres.left, gpres.right, carry, gp_maxword, aux_const)
+
+def modmultiply_wo_check_res<W, W2, W3, A, B, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNat_init_quotient<Qm1, Lp1> quotientb, BigNat_init<ZG, CL> carryb, field[NG] gp_maxword, field[AC] aux_const) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    u32 Q = Qm1 + 1
+    BigNat<Q> quotient = assert_well_formed_for_special_form::<Q, Qm1, Lp1, W, W2, W3>(quotientb)
+    BigNat<ZG> carry = adv_rangecheck::<ZG, CL, W>(carryb)
+    u32 LIMBWIDTH = W*(Lp1-1)+W2
+    return simplemodmultiply::<LIMBWIDTH, A, B, P, Z, V, Q, P, ZG, NG, AC>(a, b, z, modulus, remainder, v, quotient, carry, gp_maxword, aux_const)
+
+// Assume each limbs of `a` is checked to be within limbwidth 
+// ZG: number of limbs of carry
+// Assume we can increase carry width up to the next multiple of our subtable bitwidth = W * CL, and thus we can avoid the extra lookup cost
+def modularexpon_for_rsa<W, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, E>(BigNat<P> a, BigNat<P> modul, BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, BigNat<P> res, field[NG] gp_maxword, field[AC] aux_const) -> bool: //assume we know the number of limbs at compile time
+    BigNat<P> x = a
+    BigNat<P> a_bignat = x
+    u32 iter_num = E - 1
+    for u32 i in 0..iter_num do //iter_nums should equal 16 // 0, 1, ..., 15
+        BigNat<P> remainder = assert_well_formed::<P, Lp1, W, W2>(intermediate.mm[i].res_init) // e.g., when subtable size = 10, W = subtable size and W2 = limbwidth % subtable size = 2
+        // assert(W == 10)
+        // assert(W2 == 2)
+        assert(modmultiply_wo_check_res::<W, W2, W3, P, P, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC>(x, x, intermediate.mm[i].z, modul, remainder, intermediate.mm[i].v, intermediate.mm[i].quotient_init, intermediate.mm[i].carry_init, gp_maxword, aux_const)) // check x^2 = modul * quotient + remainder
+        x = remainder
+    endfor
+    return modmultiply_wo_check_res::<W, W2, W3, P, P, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC>(a_bignat, x, intermediate.z, modul, res, intermediate.v, intermediate.quotient_init, intermediate.carry_init, gp_maxword, aux_const) //a * a^16 mod modul
+
+
+def verify_rsa<W, W2, W3, P, P2, Z, V, Qm1, Lp1, ZG, CL, NG, AC, E>(BigNat_init<P, Lp1> a, BigNat<P> modul, BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, BigNat_init<P2, Lp1> res, field[NG] gp_maxword, field[AC] aux_const) -> bool:
+    BigNat<P> a_bignat = assert_well_formed::<P, Lp1, W, W2>(a)
+    BigNat<P2> digest_res = assert_well_formed::<P2, Lp1, W, W2>(res)
+    BigNat<P> res_bignat = BigNat{ limbs: [...digest_res.limbs, ...D_2048]}
+    return modularexpon_for_rsa::<W, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, E>(a_bignat, modul, intermediate, res_bignat, gp_maxword, aux_const)
+
+/// Assume each limb in digest_res has 32 bits without range-checking
+def partverify_rsa<W, W2, W3, P, P2, Z, V, Qm1, Lp1, ZG, CL, NG, AC, E>(BigNat_init<P, Lp1> a, BigNat<P> modul, BigNatRSAadv<P, Z, V, Qm1, Lp1, ZG, CL> intermediate, BigNat<P2> digest_res, field[NG] gp_maxword, field[AC] aux_const) -> bool:
+    BigNat<P> a_bignat = assert_well_formed::<P, Lp1, W, W2>(a)
+    // BigNat<P2> digest_res = assert_well_formed::<P2, Lp1, W, W2>(res)
+    BigNat<P> res_bignat = BigNat{ limbs: [...digest_res.limbs, ...D_2048]}
+    return modularexpon_for_rsa::<W, W2, W3, P, Z, V, Qm1, Lp1, ZG, CL, NG, AC, E>(a_bignat, modul, intermediate, res_bignat, gp_maxword, aux_const)

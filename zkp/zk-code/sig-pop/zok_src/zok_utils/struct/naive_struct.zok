@@ -1,0 +1,8 @@
+
+// corresponding to ModuloConstAdv from "zok_src/zok_utils/struct/adv_struct.zok"
+struct ModuloConstNaive<ZG, NG, AC>{
+    field[ZG] CW_list
+    field[NG] gp_maxword
+    field[AC] aux_const
+    u32 quotient_bw // bitwidth of last limb of quotient
+}

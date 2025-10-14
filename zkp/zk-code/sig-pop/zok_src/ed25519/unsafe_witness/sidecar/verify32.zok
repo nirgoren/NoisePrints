@@ -1,0 +1,14 @@
+from "./verify" import sha_rounds, ed25519_verify_w_hash, SigmaPubInput, SigmaPrivInput, NL
+
+
+
+// currently, this must be a multiple of 8!
+const u32 MSG_BYTES_ = 2048
+
+const u32 P_ = 5
+const u32 LW_ = 55
+const u32 STRIDE_ = 6
+const u32 WORDSIZE_ = 11
+
+def main(bool[256] pk, SigmaPubInput<P_> pub_i, private SigmaPrivInput<P_> priv_i, private bool[256] encoded_r, private bool[255] r_x, private field[sha_rounds::<MSG_BYTES_>()][16][NL] m) -> bool:
+    return ed25519_verify_w_hash::<P_, LW_, STRIDE_, WORDSIZE_, MSG_BYTES_>(pk, pub_i, priv_i, encoded_r, r_x, m)

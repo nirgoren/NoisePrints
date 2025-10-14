@@ -1,0 +1,49 @@
+# Seed Watermark Robustness Tests Configuration - SD1.4
+
+# General Configuration
+model_type: "sd1_4"  # "flux", "sdxl", or "sd1_4"
+model_id: "CompVis/stable-diffusion-v1-4"
+image_generation_count: 100
+output_dir: "out/robustness_tests/SD1_4/generated_images"
+latent_dir: "out/robustness_tests/SD1_4/generated_latents"
+results_file: "out/robustness_tests/SD1_4/results.csv"
+
+# Image Generation Parameters
+image_width: 512
+image_height: 512
+num_inference_steps: 50
+guidance_scale: 7.5  # SD1.4 typically uses similar guidance scale to SDXL
+
+# Base Corruption Parameterization
+base_corruptions:
+  jpeg_corruption:
+    quality: [25, 50]
+  gaussian_blur:
+    radius: [4, 8]
+  gaussian_noise:
+    std: [0.05, 0.1]
+  brightness_change:
+    factor: [0.5, 1.5, 6.0]
+  contrast_change:
+    factor: [2.0, 3.0, 4.0]
+  resize:
+    scale: [0.25, 0.5]
+
+# SDEdit Corruption Settings (optional)
+sdedit_corruptions:
+  enabled: true  # Set to true to enable SDEdit corruptions
+  noise_strengths: [0.3, 0.5, 0.7]  # List of noise strengths to test
+  attack_models: ["same", "cross"]  # Types of attacks: same model or cross-model
+  cross_model_config: "configs/sd2_0_config.yaml"  # Config for cross-model attacks
+
+# Inversion-Attack Corruption Settings (optional)
+inversion_corruptions:
+  enabled: false
+  attack_models: ["same"]
+  cross_model_config: "configs/sd2_0_config.yaml"
+  similarity_weights: [0.3]
+  fidelity_weight: 1.0
+  inversion_steps: 50
+  inversion_guidance: 1.0
+  optimization_steps: 100
+  learning_rate: 0.01

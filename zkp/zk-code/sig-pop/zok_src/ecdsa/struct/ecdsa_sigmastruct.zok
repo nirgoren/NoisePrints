@@ -1,0 +1,56 @@
+from "ecdsastruct" import ECPoint, ECPoint_v2, ECDSASignature
+from "../../zok_utils/struct/adv_struct" import BigNat_init, BigNatModMultadv, BigNatModMultwores_init
+from "../../zok_utils/big_nat" import BigNat
+from "ecdsa_advstruct" import IncompletePointAdd_init, PointAdd_x_init, ECDSASign_init
+struct ECDSASigma_public<P, Q>{
+    field[2] hcommit
+    ECPoint<P> partial_commit // partial commit for R
+    BigNat<Q>[4] responses // three responses in the sigma protocol; challenge = responses[3]
+}
+
+struct ECDSASigma_private<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA>{
+    field[2] openings
+    BigNat_init<NQ, Lp1>[6] exp_init // first three exponents are commited before the sigma protocol; last three exponents are randomly chosen in the commit phase of sigma protocol
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_1 = e_0 * u mod q, where z = e_0 * u, v = q*quotient; 2) check e_2 * r = h mod q, where z = e_2 * r, v = q*quotient
+    IncompletePointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul // compute (K^{-1})^v
+    PointAdd_x_init<NP, Z, V, Qm1, Lp1, ZG, CL, CRL> partialadd
+}
+
+struct ECDSACertSigma_init<P, Q, Lp1> {
+    ECDSASigma_public<P, Q> pub
+    ECDSASign_init<Q, Lp1> signature_init
+    BigNat_init<P, Lp1> digest_result_init
+}
+
+struct ECDSACertSigma_init_w_hash<P, Q, Lp1> {
+    ECDSASigma_public<P, Q> pub
+    ECDSASign_init<Q, Lp1> signature_init
+    BigNat<P> digest_result
+}
+
+struct ECDSASigma<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> {
+    BigNat<NQ>[4] responses // challenge and three responses in the sigma protocol
+    BigNat<NQ>[6] exponents
+    ECDSASignature<NQ> signature // r->r and v->s
+    BigNat<NQ> digest_result
+    ECPoint_v2<NP> partial_commit
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_2 = e_1 * u mod q, where z = e_1 * u, v = q*quotient; 2) check e_3 * r = h mod q, where z = e_3 * r, v = q*quotient
+    IncompletePointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul // compute (K^{-1})^v
+    // PointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul // compute (K^{-1})^v
+    PointAdd_x_init<NP, Z, V, Qm1, Lp1, ZG, CL, CRL> partialadd
+}
+
+// struct BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> { // be careful of the generics
+//     BigNat<Z> z
+//     BigNat<V> v
+//     BigNat_init_quotient<Qm1, Lp1> quotient_init
+//     BigNat_init<ZG, CL> carry_init
+// }
+
+// struct ECDSACertificate_proc<P, Q> { // W = 64
+//     ECDSASignature<Q> signature
+//     ECPoint_v2<P> issuerkey // private
+//     BigNat<Q> digest_result
+// }

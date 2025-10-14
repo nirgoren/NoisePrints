@@ -1,0 +1,12 @@
+from "../zok_utils/big_nat" import BigNat, BigNatb, BigNatb_v2, ModuloConst, ModuloHelperConst, BigNatModMultwores_v5
+from "struct/ecdsastruct" import ECPoint_plain, ECPoint_v2, ECPointb, ECPoint //, PointDouble3, PointAdd3, ScalarMult, BasePowers, ScalarMultWindow
+from "../zok_utils/assert_well_formed" import BigNatb_to_BigNat
+
+
+def ECPointb_to_ECPoint<P, W>(ECPointb<P, W> input) -> ECPoint<P>:
+    BigNat<P> x = BigNatb_to_BigNat::<P, W>(input.x)
+    BigNat<P> y = BigNatb_to_BigNat::<P, W>(input.y)
+    return ECPoint {x: x, y: y}
+
+def ECPoint_plain_to_ECPoint_v2<P>(ECPoint_plain<NP> input, bool empty) -> ECPoint_v2<P>:
+    return ECPoint_v2 {x: BigNat{ limbs: input.x}, y: BigNat{ limbs: input.y}, empty: empty}

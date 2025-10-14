@@ -1,0 +1,61 @@
+import "hashes/poseidon/poseidon" as poseidon
+
+def main(public field[512] all_commitments, private field[512] all_randomness, private field[512] all_dot_product, private field[512] all_mag1_sq, private field mag1_sq_root, private field cosine_angle, public field mag2_sq_root, public field threshold) -> bool:
+    field final_dot_product = 0
+    field final_mag1_sq = 0
+    field final_mag = 0
+    for u32 i in 0..512 do
+        // verify that commitments are correct
+        field ideal_commitment = poseidon([all_randomness[i], all_dot_product[i], all_mag1_sq[i]])
+        assert(ideal_commitment == all_commitments[i])
+
+        final_dot_product = final_dot_product + all_dot_product[i]
+        final_mag1_sq = final_mag1_sq + all_mag1_sq[i]
+    endfor
+
+    // verify that the private sq_root is correct
+    assert(mag1_sq_root*mag1_sq_root <=  final_mag1_sq)
+    assert(final_mag1_sq < (mag1_sq_root+1)*(mag1_sq_root+1))
+
+    assert(mag1_sq_root != 0)
+    assert(mag2_sq_root != 0)
+
+    // making sure that final_dot_product is in the right range
+    field final_dot_product_sign = if final_dot_product < 2**128 then 0 else 1 fi
+    field cosine_angle_sign = if cosine_angle < 2**128 then 0 else 1 fi    
+
+    //make sure that the signs match
+    assert(final_dot_product_sign == cosine_angle_sign)
+
+    // verify that private input cosine_angle is correct.
+    final_dot_product = if final_dot_product < 2**128 then final_dot_product else -final_dot_product fi
+    field final_cosine_angle = if cosine_angle < 2**128 then cosine_angle else -cosine_angle fi
+    field floor_cosine_w_mag = mag1_sq_root * mag2_sq_root * final_cosine_angle
+    field ceil_cosine_w_mag = if final_dot_product_sign == 0 then mag1_sq_root * mag2_sq_root * (final_cosine_angle + 1) else mag1_sq_root * mag2_sq_root * (final_cosine_angle - 1) fi
+
+    field scale_dot_product = final_dot_product*2**32
+
+    bool check_1 = if final_dot_product_sign == 0 then (floor_cosine_w_mag <= scale_dot_product) else (ceil_cosine_w_mag <= scale_dot_product) fi
+    bool check_2 = if final_dot_product_sign == 0 then (scale_dot_product <= ceil_cosine_w_mag) else (scale_dot_product <= floor_cosine_w_mag) fi
+    
+    assert(check_1)
+    assert(check_2)
+    
+    //public threshold:
+
+    field threshold_sign = if threshold < 2**128 then 0 else 1 fi
+    field threshold_abs  = if threshold_sign == 0 then threshold else -threshold fi
+    bool signs_differ    = (cosine_angle_sign != threshold_sign)
+
+    // If signs differ: positive >= negative is always true, negative >= positive is false
+    bool ge_if_diff = if cosine_angle_sign == 0 then true else false fi
+
+    // If same sign: compare magnitudes
+    //   both non-negative:   a >= b  <=>  abs(a) >= abs(b)
+    //   both negative:       a >= b  <=>  abs(a) <= abs(b)
+    bool ge_if_same = if cosine_angle_sign == 0 then (final_cosine_angle >= threshold_abs) else (final_cosine_angle <= threshold_abs) fi
+
+    bool ge_signed = if signs_differ then ge_if_diff else ge_if_same fi
+    assert(ge_signed)
+
+    return true

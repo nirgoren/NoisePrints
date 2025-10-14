@@ -1,0 +1,152 @@
+from "../../zok_utils/big_nat" import BigNat, BigNatb, ModuloHelperConst, ModuloConst
+from "../struct/ecdsastruct" import ECPoint, ECPoint_v2, ECDSACertificate, ECDSASignature, ECDSACertificate_proc, BasePowers_plain
+from "../verifyecdsa_dynamic_stride" import verify_signature_non_zero, to_ecpoint2
+from "../../zok_utils/advanced/mod_arithmetic_adv_v2" import modmultiply_wo_check_res
+from "../../zok_utils/basic/mod_arithmetic" import modulo
+
+from "../../zok_utils/modulomultiply" import checkmultiply, addition
+
+from "../../zok_utils/range_check" import BigNat_to_BigNatb, assert_well_formed, adv_rangecheck, assert_well_formed_for_special_form
+from "group_operation" import check_for_u_hat // from zok_src/ecdsa/advanced/group_operation.zok
+from "../advanced/group_operation_incomplete" import scalar_mult_w_incomplete_cached_window_method
+
+from "../struct/ecdsa_advstruct" import ECDSACertificate_init, ECDSASign_init, PointDouble_init, PointAdd_init, PointAdd_x_init, ECDSA_init, ScalarMult_init
+from "../../zok_utils/struct/adv_struct" import BigNatModMult_init, BigNat_init_quotient, BigNat_init, BigNatModMultadv, ModuloConstAdv, BigNatModMultwores_init
+from "../struct/ecdsaconst_advstruct" import VerifyECDSAConstAdv, PointAddConstAdv, VerifyECDSASigmaConst
+from "../../zok_utils/assert_well_formed" import is_equal
+
+from "../struct/ecdsa_sigmastruct" import ECDSASigma, ECDSASigma_private, ECDSASigma_public, ECDSACertSigma_init, ECDSACertSigma_init_w_hash
+
+from "../advanced/verifyecdsa" import signature_init_to_signature
+from "../verify_ec_operations" import compute_base, combine_limbs
+import "hashes/poseidon/poseidon" as poseidon
+
+// check reponse produced in the sigma protocol, i.e. response = rand + expo * challenge
+// Note: Q is the number of limbs of quotient, NQ is the number of limbs of normal big integer
+def check_responses<W, BW, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(BigNat<NQ> expo, BigNat<NQ> rand, BigNat<NQ> challenge, BigNat<NQ> response, BigNat<NQ> mod_q, BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> intermediate, ModuloConstAdv<ZG, NG, AC> modulo_const) -> bool:
+    // range checks for quotient and carry
+    u32 QW = modulo_const.quotient_bw
+    u32 Q = Qm1 + 1
+    u32 BW2 = W % BW
+    BigNat<Q> quotient = assert_well_formed_for_special_form::<Q, Qm1, Lp1, BW, BW2, QW>(intermediate.quotient_init)
+    BigNat<ZG> carry = adv_rangecheck::<ZG, CL, BW>(intermediate.carry_init)
+
+    assert(checkmultiply::<NQ, NQ, Z>(expo, challenge, intermediate.z)) // expo * challenge = z
+    BigNat<Z> z_left = addition::<Z, NQ>(intermediate.z, rand) // expo * challenge + rand
+    return modulo::<W, NQ, Z, V, Q, NQ, ZG, NG, LG, AC>(z_left, mod_q, response, intermediate.v, quotient, carry, modulo_const.gp_maxword, modulo_const.aux_const)
+
+def verify_mod_op<W, BW, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, PA, NG, LG, AC, CRL>(ECDSASigma<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> cert, BigNat<NQ> mod_q, ModuloConstAdv<ZG, NG, AC> modulo_const) -> bool:
+    u32 BW2 = W % BW
+    u32 QW = modulo_const.quotient_bw
+    assert(W == 32)
+    assert(BW == 10)
+    assert(BW2 == 2)
+    // check e1 = e0 v mod q
+    assert(modmultiply_wo_check_res::<BW, BW2, QW, NQ, NQ, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(cert.exponents[0], cert.signature.s, cert.exp_represent[0].z, mod_q, cert.exponents[1], cert.exp_represent[0].v, cert.exp_represent[0].quotient_init, cert.exp_represent[0].carry_init, modulo_const.gp_maxword, modulo_const.aux_const))
+    // check e2 * r = h mod q
+    assert(modmultiply_wo_check_res::<BW, BW2, QW, NQ, NQ, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(cert.exponents[2], cert.signature.r, cert.exp_represent[1].z, mod_q, cert.digest_result, cert.exp_represent[1].v, cert.exp_represent[1].quotient_init, cert.exp_represent[1].carry_init, modulo_const.gp_maxword, modulo_const.aux_const))
+    // check e'_i  = e_i + gamma_i * c
+    BigNat<NQ> challenge = cert.responses[3]
+    for u32 i in 0..3 do
+        assert(check_responses::<W, BW, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC>(cert.exponents[i], cert.exponents[i+3], challenge, cert.responses[i], mod_q, cert.prover_comp[i], modulo_const))
+    endfor
+    return true
+
+def verify_operations<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSASigma<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> cert, VerifyECDSASigmaConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    assert(verify_mod_op::<W, BW, NQ, NP, Z, V, Qm1, Lp1, ZG, CL, PA, NG, LG, AC, CRL>(cert, helper_const.Q_MODULUS, helper_const.const_for_modq))
+    BigNat<NQ> scalar = cert.signature.s
+    bool is_equal_q = is_equal::<NQ, W>(scalar, helper_const.Q_MODULUS)
+    ECPoint_v2<NP> mask = scalar_mult_w_incomplete_cached_window_method::<W, BW, NP, NQ, Z, V, Qm1, Lp1, ZG, CL, NG, LG, AC, WS, Nm1, S, LS, P_SQU, PA>(is_equal_q, scalar, helper_const.K_inv, helper_const.Kpow, cert.scalarmul, helper_const.const_for_pa)   
+    return check_for_u_hat::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU>(mask, cert.partial_commit, cert.partialadd, cert.signature.r, helper_const.Q_MODULUS, helper_const.const_for_pa, helper_const.P_MINUSQ_MINUS1)
+
+def assert_expon_well_formed<NQ, Lp1, W, W2>(BigNat_init<NQ, Lp1>[6] exponents) -> BigNat<NQ>[6]:
+    BigNat<NQ>[6] output = [BigNat{limbs: [0; NQ]}; 6]
+    for u32 i in 0..6 do
+        output[i] = assert_well_formed::<NQ, Lp1, W, W2>(exponents[i])
+    endfor
+    return output
+
+def verify_commitment<W, NQ>(field[2] hcommit, field[2] openings, BigNat<NQ>[6] exponents) -> bool:
+    u32 NQm1 = NQ - 1
+    field[NQm1] bases = compute_base::<NQm1, W>()
+    field combine_expo = combine_limbs::<3>(bases[0..3], [exponents[0].limbs[NQm1], exponents[1].limbs[NQm1], exponents[2].limbs[NQm1]])
+    field[5] poseidon_input = [...[0; 3], combine_expo, openings[0]]
+    for u32 i in 0..3 do // 0, 1, 2; fill in the first three elements of poseidon_input
+        poseidon_input[i] = combine_limbs::<NQm1>(bases, exponents[i].limbs[0..NQm1])
+    endfor
+    assert(hcommit[0] == poseidon(poseidon_input))
+
+    field combine_expo1 = combine_limbs::<3>(bases[0..3], [exponents[3].limbs[NQm1], exponents[4].limbs[NQm1], exponents[5].limbs[NQm1]])
+    field[5] poseidon_input1 = [...[0; 3], combine_expo1, openings[1]]
+    for u32 i in 0..3 do // 0, 1, 2
+        poseidon_input1[i] = combine_limbs::<NQm1>(bases, exponents[i+3].limbs[0..NQm1])
+    endfor
+
+    return hcommit[1] == poseidon(poseidon_input1)
+    
+// check if the input is non-zero
+def is_non_zero<NQ>(BigNat<NQ> input) -> bool:
+    bool non_zero = false
+    for u32 i in 0..NQ do
+        non_zero = non_zero || (input.limbs[i] != 0)
+    endfor
+    return non_zero
+// W = limbwidth
+// BW = subtable bitwidth
+// BW2 = bitwidth for bitsplitting for W-bitwidth limbs
+def verifyecdsa<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSACertSigma_init<NP, NQ, Lp1> cert, ECDSASigma_private<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> init, VerifyECDSASigmaConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    u32 BW2 = W % BW
+    assert(W == BW*(Lp1-1) + BW2)
+    assert(W == 32)
+    ECDSASignature<NQ> signature = signature_init_to_signature::<NQ, Lp1, BW, BW2>(cert.signature_init)
+    assert(is_non_zero::<NQ>(signature.r))
+    // assert(verify_signature_non_zero::<NQ>(signature)) // assert r, v to be non-zero
+    
+    BigNat<NQ>[6] exponents = assert_expon_well_formed::<NQ, Lp1, BW, BW2>(init.exp_init)
+    assert(is_non_zero::<NQ>(exponents[0])) // check that z is non-zero
+    assert(verify_commitment::<W, NQ>(cert.pub.hcommit, init.openings, exponents))
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result = assert_well_formed::<NQ, Lp1, BW, BW2>(cert.digest_result_init)
+
+    ECDSASigma<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> cert_proc = ECDSASigma {
+        responses: cert.pub.responses,
+        exponents: exponents,
+        signature: signature,
+        digest_result: digest_result,
+        partial_commit: to_ecpoint2::<NP>(cert.pub.partial_commit, false),
+        prover_comp: init.prover_comp,
+        exp_represent: init.exp_represent,
+        scalarmul: init.scalarmul,
+        partialadd: init.partialadd
+    }
+
+    return verify_operations::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(cert_proc, helper_const)
+
+
+def verifyecdsa_w_hash<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSACertSigma_init_w_hash<NP, NQ, Lp1> cert, ECDSASigma_private<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> init, VerifyECDSASigmaConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    u32 BW2 = W % BW
+    assert(W == BW*(Lp1-1) + BW2)
+    assert(W == 32)
+    ECDSASignature<NQ> signature = signature_init_to_signature::<NQ, Lp1, BW, BW2>(cert.signature_init)
+    assert(is_non_zero::<NQ>(signature.r))
+    // assert(verify_signature_non_zero::<NQ>(signature)) // assert r, v to be non-zero
+    
+    BigNat<NQ>[6] exponents = assert_expon_well_formed::<NQ, Lp1, BW, BW2>(init.exp_init)
+    assert(is_non_zero::<NQ>(exponents[0])) // check that z is non-zero
+    assert(verify_commitment::<W, NQ>(cert.pub.hcommit, init.openings, exponents))
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    // BigNat<NQ> digest_result = assert_well_formed::<NQ, Lp1, BW, BW2>(cert.digest_result_init)
+
+    ECDSASigma<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> cert_proc = ECDSASigma {
+        responses: cert.pub.responses,
+        exponents: exponents,
+        signature: signature,
+        digest_result: cert.digest_result,
+        partial_commit: to_ecpoint2::<NP>(cert.pub.partial_commit, false),
+        prover_comp: init.prover_comp,
+        exp_represent: init.exp_represent,
+        scalarmul: init.scalarmul,
+        partialadd: init.partialadd
+    }
+
+    return verify_operations::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(cert_proc, helper_const)

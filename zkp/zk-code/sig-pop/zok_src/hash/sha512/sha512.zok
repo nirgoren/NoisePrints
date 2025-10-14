@@ -1,0 +1,46 @@
+import "./shaRound" as shaRound
+from "../sha256/utils" import Dual, dual_limbs_to_dense_limbs, dense_limbs_to_dual_limbs, combine_limbs
+from "const" import IV, LIMBWIDTH
+import "utils/casts/u32_to_field"
+
+const u32 NL = 8
+
+const field[NL] SEP = [0,0,0,0,0,0,0,4]
+
+
+// given bytes, output 
+def sha512_padded_length(u32 n) -> u32:
+    u32 l = n * 8
+    u32 k = (896 + 1023 + (1024 - (l % 1024))) % 1024
+    return (l + 1 + k + 128) / 8
+
+
+def check_padding<N>(field[N][16][NL] msg, u32 M) -> bool:
+    assert(msg[M/16][M % 16] == SEP)
+    assert(u32_to_field(M << 6) == combine_limbs(msg[N-1][15], LIMBWIDTH))
+    for u32 i in M+1..N*16-1 do
+        assert(msg[i/16][i % 16] == [0; NL])
+    endfor
+    return true
+
+    
+
+// N: Number of invocations of sha256 blocks
+// M: Length of unpadded message in bytes (for now, must be a multiple of 8)
+// NL = 8: Number of limbs
+// output dense form of sha256(message)
+// def main<N, NL>(field[N][16][NL] message) -> field[8][NL]:
+def main<N, M>(field[N][16][NL] message) -> field[8]: // for debug purpose
+    assert(M % 8 == 0)
+    assert(check_padding(message, M / 8))
+    Dual[8][NL] current = IV
+    for u32 i in 0..N do
+        Dual[16][NL] cur_msg = dense_limbs_to_dual_limbs::<16,NL>(message[i], LIMBWIDTH) // implicitly do range checks for message
+        current = shaRound(cur_msg, current)
+    endfor
+
+    field[8] output = [0; 8]
+    for u32 i in 0..8 do
+        output[i] = combine_limbs(dual_limbs_to_dense_limbs(current[i]), LIMBWIDTH)
+    endfor
+    return output

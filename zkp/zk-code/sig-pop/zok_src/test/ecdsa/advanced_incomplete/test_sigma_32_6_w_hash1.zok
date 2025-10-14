@@ -1,0 +1,22 @@
+from "../../../ecdsa/sigma/const/basepower_sigma_32_6" import Kpow
+
+from "../../../ecdsa/struct/ecdsastruct" import ECPoint, ECPoint_v2, BasePowers_plain //, ECDSACertificate, ECDSASignatureb, BigNatECDSA_v2, PointDouble2, PointAdd2, PointDouble3, BigNatECDSA_v3, PointAdd3, BigNatECDSA_v4, ScalarMult, PointAdd4, ECDSACertificate_v2, ScalarMultWindow, BigNatECDSA_v5, BigNatECDSA_v7, PointAdd_x, ECDSACertificate_v2_hash_32
+from "../../../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMult, BigNatMod, BigNatModMultwores_v5, BigNatb_v2, ModuloConst, ModuloHelperConst
+
+
+// from "../../../ecdsa/struct/ecdsaconststruct" import PointDoubleConst, PointAddConst, ScalarMultConst, VerifyECDSAConst
+from "../../../ecdsa/struct/ecdsa_advstruct" import ECDSASign_init, BigNat_init, ECDSAIncomplete_init
+from "../../../ecdsa/struct/ecdsa_sigmastruct" import ECDSASigma_public, ECDSASigma_private
+from "./test_sigma_32_w_hash" import verifyecdsa_32
+from "const" import W_, BITWIDTH, NP_, NQ_, NP2, Z_, V_, Qm1_, Lp1, ZG_, CL, CRL, PA_, NG_, LG_, AC_, P_SQU_, Nm1_, S_, LS_, WS_
+
+const u32 N = 1
+const u32 NL = 3
+// Hard-coded: K, K^{-1}
+// commit[0] is computed for (e_i)_{i\in[3]}
+// commit[1] is computed for (gamma_i)_{i\in[3]}
+// Public inputs: field[2] commit, C^{(1)}, (e'_i)_{i\in[3]}
+// Inputs: digest_result_init, signature_init (r, v), 
+def main(ECDSASigma_public<NP_, NQ_> pub, private ECDSASign_init<NQ_, Lp1> signature_init, private field[N][16][NL] padded_message, private ECDSASigma_private<NQ_, NP_, Z_, V_, Qm1_, Lp1, ZG_, CL, CRL, PA_> init) -> bool:
+    assert(verifyecdsa_32::<W_, BITWIDTH, NQ_, NP_, NP2, Z_, V_, Qm1_, Lp1, ZG_, CL, CRL, NG_, LG_, AC_, P_SQU_, Nm1_, S_, LS_, PA_, WS_, N>(pub, signature_init, padded_message, init, Kpow))
+    return true

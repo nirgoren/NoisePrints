@@ -1,0 +1,13 @@
+from "../../../zok_utils/struct/naive_struct" import ModuloConstNaive
+from "../../Fp-estimate/struct/ecdsaFp_conststruct" import PointAddConstFp
+from "../../Fp-estimate/struct/ecdsaFp_struct" import ECPoint_Fp
+from "../../../zok_utils/big_nat" import BigNat
+
+// Corresponding to VerifyECDSAFpConst in zok_src/ecdsa/Fp-estimate/struct/ecdsaFp_conststruct.zoks
+struct VerifyECDSAFpNaiveConst<NQ, ZG, NG, AC> {
+    ModuloConstNaive<ZG, NG, AC> const_for_modq // to test
+    PointAddConstFp const_for_pa
+    BigNat<NQ> Q_MODULUS
+    field P_MINUSQ_MINUS1
+    ECPoint_Fp K_inv // (-1) * H(G) or (-1) * G
+}

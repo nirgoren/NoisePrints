@@ -1,0 +1,25 @@
+from "../../../ecdsa/struct/ecdsastruct" import ECDSASignatureb //, ECDSACertificate, ECDSASignatureb, BigNatECDSA_v2, PointDouble2, PointAdd2, PointDouble3, BigNatECDSA_v3, PointAdd3, BigNatECDSA_v4, ScalarMult, PointAdd4, ECDSACertificate_v2, ScalarMultWindow, BigNatECDSA_v5, BigNatECDSA_v7, PointAdd_x, ECDSACertificate_v2_hash_32
+from "../../../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMult, BigNatMod, BigNatModMultwores_v5, BigNatb_v2, ModuloConst, ModuloHelperConst
+
+
+from "../../../ecdsa/struct/ecdsa_advstruct" import BigNat_init, ECDSAIncomplete_init
+from "../../../ecdsa/Fp-estimate/struct/ecdsaFp_struct" import ECDSAFp_public, ECPoint_Fp, ECDSAFpNaive_init_v2, ECDSASign_partinit
+from "../../../ecdsa/Fp-estimate/struct/ecdsaFp_conststruct" import BasePowers_Fp
+// from "../../../ecdsa/struct/ecdsa_sigmastruct" import ECDSASigma_public, ECDSASigma_private
+from "./test_naive_32_inner_w_hash" import verifyecdsa
+
+from "../../../ecdsa/Fp/struct/ecdsa_struct" import ECDSACertNaive_Fp_init, ECDSANaive_Fp_init, PointAdd_x_Fp_init
+
+from "const_32" import NQ, W, Z, V, ZG, NG, LG, AC
+from "const_32_p256" import W2, CW, CRL, NP2, Qm1
+
+
+// N: Number of invocations of sha256 blocks
+const u32 N = 8
+// NL: Number of limbs; Independent of number of invocations of sha256 blocks
+const u32 NL = 3 
+// private BigNatb<NQ, W> digest_resultb
+def main(ECPoint_Fp issuerkey, private ECDSASignatureb<NQ, W> signatureb, private field[N][16][NL] padded_message, private ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> intermediate) -> bool:
+    assert(verifyecdsa::<NQ, NP2, W, W2, Z, V, Qm1, CW, CRL, ZG, NG, LG, AC, N, NL>(issuerkey, signatureb, padded_message, intermediate))
+    return true
+

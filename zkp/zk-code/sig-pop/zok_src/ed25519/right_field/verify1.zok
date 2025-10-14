@@ -1,0 +1,6 @@
+from "./verify" import ed25519_verify, sha_rounds, Point, NL
+
+const u32 MSG_BYTES_ = 64
+
+def main(private bool[256] encoded_r, private bool[255] r_x, bool[256] pk, Point a, private bool[255] s, private field[sha_rounds::<MSG_BYTES_>()][16][NL] m) -> bool:
+    return ed25519_verify::<MSG_BYTES_>(encoded_r, r_x, pk, a, s, m)

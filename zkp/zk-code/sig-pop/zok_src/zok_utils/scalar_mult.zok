@@ -1,0 +1,12 @@
+from "../zok_utils/big_nat" import BigNat
+import "utils/casts/u32_to_field"
+
+// Output input*3; the output may not be well-formed
+// Need to check S out of the circuit
+def scalar_multiply_bignat<P, S>(BigNat<P> input) -> BigNat<P>: // assume the input is well-formed
+    BigNat<P> res = BigNat {limbs: [0;P]}
+    field scalar = u32_to_field(S)
+    for u32 i in 0..P do
+        res.limbs[i] = input.limbs[i]*scalar
+    endfor
+    return res

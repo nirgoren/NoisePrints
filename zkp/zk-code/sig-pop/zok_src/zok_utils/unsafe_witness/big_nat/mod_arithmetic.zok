@@ -1,0 +1,453 @@
+from "EMBED" import FIELD_MODULUS, int_size, int_modinv, integer_to_field, field_to_integer
+from "./struct" import BigNat, BigNatParams, integer_to_unchecked, check_bignat_w_bitlen, UncheckedBigNat, integer_to_bignat, bignat_to_integer, extend_bignat, bignat_max_value
+from "../util" import max, ceildiv, equalize_len, equalize_lenf, ceildivi, zip_maxi
+from "../range_check" import range_check_pow2_bound
+import "utils/casts/u32_to_field"
+//import "utils/casts/integer_to_field"
+//import "utils/casts/field_to_integer"
+
+// Polynomial multiplicatoin of bignats
+def unsafe_poly_multiply<A,B,Z>(field[A] a, field[B] b) -> field[Z]:
+    assert(Z >= A + B - 1)
+    field[Z] z = [0; Z]
+    for u32 i in 0..A do
+        for u32 j in 0..B do
+            z[i+j] = z[i+j] + a[i] * b[j]
+        endfor
+    endfor
+
+    return z
+
+def poly_multiply_integer<A,B,Z>(integer[A] a, integer[B] b) -> integer[Z]:
+    assert(Z >= A + B - 1)
+    integer[Z] z = [0; Z]
+    for u32 i in 0..A do
+        for u32 j in 0..B do
+            z[i+j] = z[i+j] + a[i] * b[j]
+            assert(z[i+j] < FIELD_MODULUS)
+        endfor
+    endfor
+
+    return z
+
+// evaluate a polynomial at x
+def poly_eval<N>(field[N] coeffs, field x) -> field:
+    field val = 0
+    field accumulated_x = 1
+    for u32 i in 0..N do
+        val = val + coeffs[i] * accumulated_x
+        accumulated_x = accumulated_x * x
+    endfor
+    return val
+
+
+// TODO: change the zsharp frontend to allow BigNat<A+B> like you can already do field[A+B]
+def multiply<A,B,Z>(BigNat<A> a, BigNat<B> b) -> BigNat<Z>:
+    assert(Z >= A + B - 1)
+    u32 LW = a.params.limbwidth
+    assert(LW == b.params.limbwidth)
+
+    // no need to range check these 
+    unsafe witness field[Z] zlimbs = unsafe_poly_multiply::<A,B,Z>(a.limbs, b.limbs)
+
+    BigNat<Z> z = BigNat {
+        limbs: zlimbs,
+        value: a.value * b.value,
+        params: BigNatParams {
+            max_limbs: poly_multiply_integer::<A,B,Z>(a.params.max_limbs, b.params.max_limbs),
+            limbwidth: LW
+        }
+    }
+
+    for field x in 0..u32_to_field(Z) do
+        assert(poly_eval(a.limbs, x) * poly_eval(b.limbs, x) == poly_eval(z.limbs, x))
+    endfor
+    return z
+
+
+def add<A,B,C>(BigNat<A> a, BigNat<B> b) -> BigNat<C>: 
+    u32 MAB = max(A,B)
+    assert(C >= MAB)
+    assert(a.params.limbwidth == b.params.limbwidth)
+    field[2][MAB] limbs = equalize_lenf::<A,B,MAB>(a.limbs, b.limbs)
+    integer[2][MAB] max_limbs = equalize_len::<A,B,MAB>(a.params.max_limbs, b.params.max_limbs)
+
+    field[C] output_limbs = [0; C]
+    integer[C] output_max = [0; C]
+    for u32 i in 0..MAB do
+        output_limbs[i] = limbs[0][i] + limbs[1][i]
+        output_max[i] = max_limbs[0][i] + max_limbs[1][i]
+        assert(output_max[i] < FIELD_MODULUS)
+    endfor
+    return BigNat {
+        limbs: output_limbs,
+        value: a.value + b.value,
+        params: BigNatParams {
+            max_limbs: output_max,
+            limbwidth: a.params.limbwidth
+        }
+    }
+
+
+ 
+// strictly only limbs_per_group is necessary, but I hope this improves compile time performance somewhat
+struct GroupInfo<N> {
+    u32 ng
+    u32[N] limbs_per_group
+    u32 max_limbs_per_group
+}
+
+// Determine the minimum number of limbs we can pack the limbs of a (resp.) b into for equal_when_caried
+def num_groups<N>(BigNatParams<N> a, BigNatParams<N> b) -> GroupInfo<N>:
+    assert(a.limbwidth == b.limbwidth)
+    integer[N] maxvals = zip_maxi(a.max_limbs, b.max_limbs)
+
+    integer current_maxval = 0
+    u32[N] steps = [0; N]
+    u32 step_idx = 0
+    integer shift = 1
+    u32 limbwidth = a.limbwidth
+    integer base = 2**limbwidth
+    for u32 i in 0..N do
+        integer next_maxval = current_maxval + maxvals[i] * shift
+        // should the cutoff point be less than FIELD_MODULUS since the ultimate carry expression has more terms?
+        // this hasn't cropped up yet but it could
+        bool spillover = next_maxval >= FIELD_MODULUS
+        step_idx = if (spillover) then step_idx + 1 else step_idx fi
+        current_maxval = if (spillover) then 0 else current_maxval fi
+        shift = if (spillover) then 1 else shift fi
+        steps[step_idx] = steps[step_idx] + 1
+        current_maxval = current_maxval  + maxvals[i] * shift
+        shift = shift * base
+    endfor
+
+    bool done = false
+    u32 ng = 0
+    u32 max_step = 0
+    for u32 i in 0..N do
+        done = if (done) then done else steps[i] == 0 fi
+        ng = if (done) then ng else i fi
+        max_step = max(max_step, steps[i])
+    endfor
+    //for u32 i in 1..ng do
+        //assert(steps[i] == steps[i-1])
+    //endfor
+    //assert(steps[ng] == 5)
+    //assert(steps[0] == 6)
+    //assert(N == 23)
+    return GroupInfo {
+        ng: ng + 1,
+        limbs_per_group: steps,
+        max_limbs_per_group: max_step
+    }
+
+
+// this is a hack, I should figure out the proper interface
+// This is basically a BigNat with variable-width limbs
+// Probably ideally, I should just allow BigNat to have this
+struct LimbGroups<N> {
+    field[N] groups
+    integer[N] group_max
+    u32[N] group_widths
+}
+
+ 
+ // Pack the limbs of b into limbs whose widths are given by `groups`
+ // max_group = max(groups)
+def group_limbs<N, NG>(BigNat<N> b, u32[NG] groups, u32 max_group) -> LimbGroups<NG>:
+    field[NG] grouped = [0; NG]
+    integer[NG] grouped_max = [0; NG]
+    integer[max_group] accumulated = [1; max_group]
+    u32 limbwidth = b.params.limbwidth
+    integer shift = 2**limbwidth
+    u32[NG] group_widths = [0; NG]
+
+    // calculate [shift^0, shift^1, ..., shift^(limbs_per_group-1)]
+    for u32 j in 1..max_group do
+        accumulated[j] = accumulated[j-1]*shift
+    endfor
+
+    u32 counter = 0
+    for u32 i in 0..NG do
+        u32 limbs_per_group = groups[i]
+        group_widths[i] = limbs_per_group * limbwidth
+        for u32 j in 0..limbs_per_group do
+            grouped[i] = grouped[i] + b.limbs[counter] * integer_to_field(accumulated[j])
+            grouped_max[i] = grouped_max[i] + b.params.max_limbs[counter] * accumulated[j]
+            counter = counter + 1
+        endfor
+    endfor
+    assert(counter == N)
+
+    return LimbGroups {
+        groups: grouped,
+        group_max: grouped_max,
+        group_widths: group_widths
+    }
+
+
+// nudge[i] is minimal value such that left[i] - right[i] + nudge[i] is non-negative
+// right now this is just right.group_max, but if we want to natively support subtraction later, left.group_min
+// or something similar would be taken into accoutn
+def compute_nudges<N>(LimbGroups<N> left, LimbGroups<N> right) -> integer[N]:
+    return right.group_max
+    
+
+// First N elements are the acuumulated remainders for the mod 2**group_widths[i] checks in equal_when_carried
+// 
+def accumulate_remainders<N>(integer[N] nudges, u32[N] group_widths) -> integer[N+1]:
+    integer[N+1] nudge_remainders = [0; N+1]
+    integer accumulated_extra = 0
+    for u32 i in 0..N do
+        integer target_base = 2**(group_widths[i])
+        accumulated_extra = accumulated_extra + nudges[i]
+        nudge_remainders[i] = accumulated_extra % target_base
+        accumulated_extra = accumulated_extra / target_base
+    endfor
+    nudge_remainders[N] = accumulated_extra
+    return nudge_remainders
+    
+
+    
+def groups_equal_when_carried<NG,WORDSIZE>(LimbGroups<NG> left, LimbGroups<NG> right) -> bool:
+    assert(left.group_widths == right.group_widths)
+    u32[NG] group_widths = left.group_widths
+    integer[NG] nudges = compute_nudges::<NG>(left, right)
+    integer[NG+1] remainders = accumulate_remainders::<NG>(nudges, group_widths)
+
+    integer[NG] carry_in_bounds = [0; NG]
+    field carry_in = 0
+
+    for u32 i in 0..NG-1 do
+        field target_base = 2**(group_widths[i])
+        unsafe witness field next_carry = integer_to_field((field_to_integer(left.groups[i]) + field_to_integer(carry_in) + nudges[i] - field_to_integer(right.groups[i])) / field_to_integer(target_base))
+
+        u32 CW = int_size((nudges[i] + carry_in_bounds[i] + left.group_max[i]) / field_to_integer(target_base))
+        carry_in_bounds[i+1] = range_check_pow2_bound::<CW,WORDSIZE>(next_carry)
+
+        integer lhs_bound = left.group_max[i] + carry_in_bounds[i] + nudges[i]
+        integer rhs_bound = remainders[i] + carry_in_bounds[i+1] * field_to_integer(target_base) + right.group_max[i]
+        //print("lhs: {}, rhs: {}", int_size(lhs_bound), int_size(rhs_bound))
+        assert(lhs_bound < FIELD_MODULUS && rhs_bound < FIELD_MODULUS, "overflow in carry operation, check params")
+        assert(left.groups[i] + carry_in + integer_to_field(nudges[i]) == next_carry * target_base + right.groups[i] + integer_to_field(remainders[i]))
+        carry_in = next_carry
+    endfor
+
+    // last iteration we use remainders[NG] as next_carry
+    field target_base = 2**(group_widths[NG-1])
+    integer lhs_bound = left.group_max[NG-1] + carry_in_bounds[NG-1] + nudges[NG-1]
+    integer rhs_bound = remainders[NG] * field_to_integer(target_base) + right.group_max[NG-1] + remainders[NG-1]
+    assert(lhs_bound < FIELD_MODULUS && rhs_bound < FIELD_MODULUS, "overflow in carry operation, check params")
+
+    assert(left.groups[NG-1] + carry_in + integer_to_field(nudges[NG-1]) == integer_to_field(remainders[NG]) * target_base + right.groups[NG-1] + integer_to_field(remainders[NG-1]))
+    return true
+
+
+// assert that a == b (as integers)
+def equal_when_carried<A,B,WORDSIZE>(BigNat<A> a, BigNat<B> b) -> bool:
+    u32 MAB = max(A,B)
+    // room for optimization because if a's limbs are bigger than b, we get smaller carries!
+    BigNat<MAB> left = extend_bignat::<A,MAB>(a)
+    BigNat<MAB> right = extend_bignat::<B,MAB>(b)
+    GroupInfo<MAB> info = num_groups::<MAB>(left.params, right.params)
+    u32 NG = info.ng
+    u32[NG] limbs_per_group = info.limbs_per_group[..NG]
+    LimbGroups<NG> group_left = group_limbs::<MAB,NG>(left, limbs_per_group, info.max_limbs_per_group)
+    LimbGroups<NG> group_right = group_limbs::<MAB,NG>(right, limbs_per_group, info.max_limbs_per_group)
+    assert(groups_equal_when_carried::<NG,WORDSIZE>(group_left, group_right))
+    return true
+
+// requires that a.value >= remainder.value
+def modulo_equal_inner<A,R,M,WORDSIZE>(BigNat<A> a, BigNat<R> remainder, BigNat<M> modulus) -> bool:
+    assert(a.params.limbwidth == modulus.params.limbwidth)
+    assert(a.params.limbwidth == remainder.params.limbwidth)
+    u32 limbwidth = a.params.limbwidth
+
+    u32 QUOT_SIZE = int_size(bignat_max_value(a.params) / bignat_to_integer(modulus))
+    u32 Q = max(ceildiv(QUOT_SIZE, limbwidth), 1)
+    //assert(Q == 4)
+    //u32 Q = int_size(bignat_max_value(a.params))
+    unsafe witness UncheckedBigNat<Q> quotient_unchecked = integer_to_unchecked::<Q>((bignat_to_integer(a) - bignat_to_integer(remainder)) / bignat_to_integer(modulus), limbwidth)
+    BigNat<Q> quotient = check_bignat_w_bitlen::<Q,WORDSIZE>(quotient_unchecked, limbwidth, QUOT_SIZE)
+
+    u32 QM = Q + M - 1
+    BigNat<QM> v = multiply::<Q,M,QM>(quotient, modulus)
+    u32 RHS = max(QM,R)
+
+    BigNat<RHS> rhs = add::<QM,R,RHS>(v, remainder)
+    assert(equal_when_carried::<A,RHS,WORDSIZE>(a, rhs))
+
+    return true
+
+
+// asserts that a == b mod modulus
+// Adds a `nudge` to a to ensure it is at least as large as b, then calls modulo_equal_inner
+def modulo_equal<A,B,M,WORDSIZE>(BigNat<A> a, BigNat<B> b, BigNat<M> modulus) -> bool:
+    integer max_b = bignat_max_value(b.params)
+    integer modulus_val = bignat_to_integer(modulus)
+    integer nudge_val = ceildivi(max_b, modulus_val) * modulus_val
+    u32 NL = ceildiv(int_size(nudge_val), a.params.limbwidth)
+    u32 LW = a.params.limbwidth
+    BigNat<NL> nudge_nat = integer_to_bignat::<NL,LW>(nudge_val)
+    u32 MANL = max(A,NL)
+    BigNat<MANL> nudged_a = add::<A,NL,MANL>(a, nudge_nat)
+    assert(modulo_equal_inner::<MANL,B,M,WORDSIZE>(nudged_a, b, modulus))
+    return true
+
+
+def modulo_reduce<A,M,WORDSIZE>(BigNat<A> a, BigNat<M> modulus) -> BigNat<M>:
+    unsafe witness UncheckedBigNat<M> reduced_unchecked = integer_to_unchecked::<M>(bignat_to_integer(a) % bignat_to_integer(modulus), modulus.params.limbwidth)
+    BigNat<M> reduced = check_bignat_w_bitlen::<M,WORDSIZE>(reduced_unchecked, modulus.params.limbwidth, int_size(bignat_to_integer(modulus)))
+    assert(modulo_equal_inner::<A,M,M,WORDSIZE>(a, reduced, modulus))
+    return reduced
+    
+
+// check a = b / c mod m
+def modulo_check_divide<A,B,C,M,WORDSIZE>(BigNat<A> a, BigNat<B> b, BigNat<C> c, BigNat<M> modulus) -> bool:
+    u32 PAC = A + C - 1
+    BigNat<PAC> prod = multiply::<A,C,PAC>(a,c)
+    assert(modulo_equal::<B,PAC,M,WORDSIZE>(b, prod, modulus))
+    return true
+
+def integer_mod_divide(integer b, integer c, integer modulus) -> integer:
+    return (b * int_modinv(c, modulus)) % modulus
+
+// compute b / c mod M
+def modulo_divide<B,C,M,WORDSIZE>(BigNat<B> b, BigNat<C> c, BigNat<M> modulus) -> BigNat<M>:
+    unsafe witness UncheckedBigNat<M> a_unchecked = integer_to_unchecked::<M>(integer_mod_divide(bignat_to_integer(b), bignat_to_integer(c), bignat_to_integer(modulus)), modulus.params.limbwidth)
+    BigNat<M> a = check_bignat_w_bitlen::<M,WORDSIZE>(a_unchecked, modulus.params.limbwidth, int_size(bignat_to_integer(modulus)))
+    assert(modulo_check_divide::<M,B,C,M,WORDSIZE>(a, b, c, modulus))
+    return a
+    
+
+
+//def modulo_inverse<A,M,WORDSIZE>(BigNat<A> a, BigNat<M> modulus) -> BigNat<M>:
+//    u32 LW = modulus.params.limbwidth
+//    unsafe witness field[M] inv_limbs = integer_to_limbs::<M>(int_modinv(bignat_to_integer(a), bignat_to_integer(modulus)), LW)
+//    BigNat<M> inverse = new_bignat(inv_limbs, LW)
+//    u32 PROD = M*A-1
+//    BigNat<PROD> should_be_one = multiply::<A,M,PROD>(a, inverse)
+//    assert(modulo_equal_inner::<M,PROD,M,WORDSIZE>(integer_to_bignat::<M,LW>(1), should_be_one, modulus))
+//    return inverse
+
+
+// const integer D = 37095705934669439343138083508754565189542113879843219016388785533085940283555
+// const integer MODULUS = 57896044618658097711785492504343953926634992332820282019728792003956564819949
+// const integer B = 15112221349535400772501151409588531511454012693041857206046113283949847762202
+
+
+// const u32 N_ = 4
+// const u32 LW_ = 64
+// const u32 WORDSIZE_ = 8
+
+// const u32 N2_ = N_ + N_ - 1
+// def main(private UncheckedBigNat<N_> c_u, private UncheckedBigNat<N_> b_u) -> bool:
+//     BigNat<N_> modulus = integer_to_bignat::<N_,LW_>(MODULUS)
+//     BigNat<N_> b = check_bignat_w_bitlen::<N_,WORDSIZE_>(b_u, LW_, 255)
+//     BigNat<N_> c = check_bignat_w_bitlen::<N_,WORDSIZE_>(c_u, LW_, 255)
+//     //BigNat<N_> c = integer_to_bignat::<N_,LW_>(D)
+//     //assert(modulo_equal::<N_,N_,N_,WORDSIZE_>(c, c,modulus))
+//     BigNat<N2_> bc = add::<N_, N2_, N2_>(c, multiply::<N_, N_, N2_>(modulus, c))
+
+//     assert(modulo_equal::<N2_,N_,N_,WORDSIZE_>(bc, c,modulus))
+//     //BigNat<8> x3 = modulo_divide::<8,8,8,8>(b, c, modulus)
+
+//     //BigNat<8> a = integer_to_bignat::<8,32>(1)
+//     //BigNat<8> mod = integer_to_bignat::<8,32>(DEFAULT_MODULUS)
+//     //BigNat<8> c = add::<8,8,8>(a, mod)
+//     //BigNat<15> b = multiply::<8,8,15>(a, integer_to_bignat::<8,32>(1))
+//     //assert(modulo_equal::<8,15,8,10>(c,b,mod))
+//     //BigNat<3> a = integer_to_bignat::<3, 32>(123802183092180942804128109)
+//     //BigNat<2> b = integer_to_bignat::<2, 32>(4982104984091284092)
+//     //BigNat<2> c = integer_to_bignat::<2, 32>(8402184092498)
+//     //BigNat<5> ab = multiply::<3,2,5>(a,b)
+//     //BigNat<9> abc = multiply::<5,2,9>(ab, c)
+//     //BigNat<2> mod = integer_to_bignat::<2,32>(42)
+//     //BigNat<8> D_NAT = integer_to_bignat::<8,32>(D)
+//     //BigNat<8> B_NAT = integer_to_bignat::<8,32>(B)
+//     //BigNat<8> M_NAT = integer_to_bignat::<8,32>(MODULUS)
+
+    
+//     //BigNat<8> x3 = modulo_divide::<15,8,8,8>(DB, B_NAT, M_NAT)
+
+//     return true
+
+// const bool[4] exponent = [true,false,false,false]
+const bool[17] exponent = [true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true]
+// const field[17] r = [1012264535757217443627057533480605025, 5126812502402882822752979747131822789, 17936728719329689394712253245842781493, 2751973526350956511497070671753559027, 11734696181104592381869567242734982721, 9970778582760121586213193817082333435, 7522763586652545181673631517417873032, 17927320161964837336690713489077470441, 17392900038217410308160449538030951102, 4666407022536327893217035660808465153, 17721584936819236656891523480260322960, 13295184425827138927110529249025724531, 18091197419102622099180310980439074540, 11876750820321484560131932120391206801, 17048312732623350440089155400459190700, 7702786528345351367662557648132020518, 7243704425427722084]
+const integer result = 1
+const integer N = 20178927341455904369096919339071324001617078631762175814877541447479028547335149313909069066055303252851780347400950257395432187975849691108602009638958910339505322573926025484798855472444917774963061365304170710821645433459172809602038894629151277248757645723547408586246479035396330501863132506856661623171953061958517673260172542909953896446236799302676540838934504755374923856445503395605291006693895395972205362126792827567308469597992713622352677141829975197496915673420703137784789567464460491699767168216156903499138929067724663552550917105878765439286906883286286547178819974473168811977056384207194840595217
+
+def cond_point_mult_for_true(BigNat<17> p1, BigNat<17> p2, BigNat<17> default) -> BigNat<17>:
+    BigNat<34> prod = multiply::<17, 17, 34>(p1,p2)
+    BigNat<17> checked_N = integer_to_bignat::<17, 124>(N)
+    BigNat<17> prod_mod = modulo_reduce::<34, 17, 8>(prod, checked_N)
+    BigNat<17> out = prod_mod
+    return out
+
+def cond_point_mult_for_false(BigNat<17> p1, BigNat<17> p2, BigNat<17> default) -> BigNat<17>:
+    return default
+
+def double(BigNat<17> p1) -> BigNat<17>:
+    BigNat<34> prod = multiply::<17, 17, 34>(p1,p1)
+    BigNat<17> checked_N = integer_to_bignat::<17, 124>(N)
+    BigNat<17> prod_mod = modulo_reduce::<34, 17, 8>(prod, checked_N)
+    return prod_mod
+
+def exp_mod_N(field[17] r) -> BigNat<17>:
+    UncheckedBigNat<17> unchecked_addend = UncheckedBigNat{limbs : r}
+    BigNat<17> checked_addend = check_bignat_w_bitlen::<17, 8>(unchecked_addend, 124, 2048)
+    BigNat<17> checked_result = integer_to_bignat::<17, 124>(result)
+
+
+    checked_result = cond_point_mult_for_true(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+    
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_false(checked_result, checked_addend, checked_result)
+    checked_addend = double(checked_addend)
+
+    checked_result = cond_point_mult_for_true(checked_result, checked_addend, checked_result)
+
+    return checked_result

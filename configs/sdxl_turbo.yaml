@@ -1,0 +1,22 @@
+# Seed Watermark Robustness Tests Configuration - SDXL
+
+# General Configuration
+model_type: "sdxl"
+model_id: "stabilityai/sdxl-turbo"
+image_generation_count: 100
+output_dir: "out/robustness_tests/SDXL_turbo/generated_images"
+latent_dir: "out/robustness_tests/SDXL_turbo/generated_latents"
+results_file: "out/robustness_tests/SDXL_turbo/results.csv"
+
+# Image Generation Parameters
+image_width: 512
+image_height: 512
+num_inference_steps: 4
+guidance_scale: 0.0  # SDXL Turbo requires guidance_scale=0.0 (trained without CFG)
+
+# SDEdit Corruption Settings (optional)
+sdedit_corruptions:
+  enabled: false  # Set to true to enable SDEdit corruptions
+  noise_strengths: [0.2, 0.3]  # List of noise strengths to test
+  attack_models: ["cross"]  # Types of attacks: same model or cross-model
+  cross_model_config: "configs/flux_config.yaml"  # Config for cross-model attacks

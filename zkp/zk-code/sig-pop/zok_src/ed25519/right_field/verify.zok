@@ -1,0 +1,153 @@
+from "../../hash/sha256/basic_op" import sum
+from "../../hash/sha256/utils" import combine_limbs, dual_limbs_to_dense_limbs,unsafe_split_dyn
+from "../../hash/sha512/const" import LIMBWIDTH
+from "../../zok_utils/assert_well_formed" import fits_in_bits, dense_to_sparse
+import "../../hash/sha512/sha512" as sha512
+from "../../hash/sha512/sha512" import sha512_padded_length, NL
+from "../../zok_utils/unsafe_witness/big_nat/struct" import BigNat, UncheckedBigNat, integer_to_bignat, bits_to_bignat, bignat_to_bits, new_bignat
+from "../../zok_utils/unsafe_witness/big_nat/mod_arithmetic" import modulo_reduce, ceildiv
+from "../unsafe_witness/sidecar/verify" import sha_rounds
+from "../unsafe_witness/baseline/group_operations" import Q, Q_SIZE
+
+def bool_to_field(bool x) -> field:
+    return if (x) then 1 else 0 fi
+    
+struct Point {
+    field x
+    field y
+    field z
+    field t
+}
+
+const Point IDENT = Point { x: 0, y: 1, z: 1, t: 0 }
+const Point B = Point { x: 15112221349535400772501151409588531511454012693041857206046113283949847762202,
+                        y: 46316835694926478169428394003475163141307993866256225615783033603165251855960,
+                        z: 1,
+                        t: 46827403850823179245072216630277197565144205554125654976674165829533817101731 
+}
+ 
+
+const field D = 37095705934669439343138083508754565189542113879843219016388785533085940283555
+
+// addition-add-2008-hwcd-3
+def point_add(Point p1, Point p2) -> Point:
+    field a = (p1.y - p1.x) * (p2.y - p2.x)
+    field b = (p1.y + p1.x) * (p2.y + p2.x)
+    field c = p1.t * 2 * D * p2.t
+    field d = p1.z * 2 * p2.z
+    field e = b - a
+    field f = d - c
+    field g = d + c
+    field h = b + a
+    return Point { x: e * f, y: g * h, z: f * g, t: e * h }
+
+// dbl-2008-hwcd
+def point_dbl(Point p) -> Point:
+    field a = p.x * p.x
+    field b = p.y * p.y
+    field c = 2 * p.z * p.z
+    field e = ((p.x + p.y) * (p.x + p.y) - a - b)
+    field g = b - a
+    field f = g - c
+    field h = -a - b
+    return Point { x: e * f, y: g * h, z: f * g, t: e * h }
+
+def scalar_mult<N>(Point p, bool[N] e) -> Point:
+    Point addend = p
+    Point result = IDENT
+    for u32 i in 0..N do
+        result = if e[i] then point_add(result, addend) else result fi
+        addend = point_dbl(addend)
+    endfor
+    return result
+
+def point_equal(Point p, Point q) -> bool:
+    return p.x * q.z - q.x * p.z == 0 && p.y * q.z - q.y * p.z == 0
+
+def is_on_curve(Point p) -> bool:
+    return p.z != 0 && p.x * p.y == p.z * p.t && p.y * p.y - p.x * p.x - p.z * p.z - D * p.t * p.t == 0
+
+def verify_ed25519(Point r, Point a, bool[255] s, bool[Q_SIZE] h) -> bool:
+    Point p = scalar_mult(B, s)
+    Point q = point_add(r, scalar_mult(a, h))
+    return is_on_curve(p) && is_on_curve(q) && point_equal(p,q)
+
+def bits_to_value<N>(bool[N] bits) -> field:
+    field value = 0
+    field shift = 1
+    for u32 i in 0..N do
+        value = value + shift * (if (bits[i]) then 1 else 0 fi)
+        shift = shift * 2
+    endfor
+    return value
+
+def change_endianness<N>(bool[N] input) -> bool[N]:
+    bool[N] output = [false; N]
+    u32 WS = N / 64
+    for u32 i in 0..WS do
+        for u32 j in 0..8 do
+            for u32 k in 0..8 do
+                output[64 * i + 8 *j + k] = input[64 * i + 8 * (8-1-j) + k]
+            endfor
+        endfor
+    endfor
+    return output
+
+    
+
+def bits_to_values<N,M>(bool[N] bits) -> field[M]:
+    assert(N % M == 0)
+    u32 X = N/M
+    field[M] output = [0; M]
+    for u32 i in 0..M do
+        output[i] = bits_to_value(bits[i*X..(i+1)*X])
+    endfor
+    return output
+
+
+def split_limbs<N>(field x, u32[N] LIMBWIDTH) -> field[N]:
+    unsafe witness field[N] split = unsafe_split_dyn(x, LIMBWIDTH)
+    for u32 i in 0..N do
+        u32 L = LIMBWIDTH[i]
+        // this should(?) be the same as fits_in_bits but lets us use the dense_to_sparse table instead so we don't incur setup cost of dense table
+        //field sparse_throwaway = dense_to_sparse::<L>(split[i])
+        assert(fits_in_bits::<L>(split[i]))
+    endfor
+    assert(combine_limbs::<N>(split, LIMBWIDTH) == x)
+    return split
+
+
+def verify_encode_point(bool[256] encoded, bool[255] x_bin) -> Point:
+    field x = bits_to_value(x_bin)
+    field y = bits_to_value(encoded[0..255])
+    assert(encoded[255] == x_bin[0])
+
+    field y2 = y * y
+    field x2 = x * x
+    assert(y2 - x2 == 1 + D * x2 * y2)
+
+    return Point { x: x, y: y, z: 1, t: x * y }
+
+
+def ed25519_verify<MSG_BYTES>(bool[256] encoded_r, bool[255] r_x, bool[256] pk, Point a, bool[255] s, field[sha_rounds::<MSG_BYTES>()][16][NL] m) -> bool:
+    Point r = verify_encode_point(encoded_r, r_x)
+    // not checking that pk and a correspond because they are public. should be done out of band
+
+    field[8] to_concat = bits_to_values::<512, 8>(change_endianness::<512>([...encoded_r, ...pk]))
+    for u32 i in 0..8 do
+        m[0][i] = split_limbs(to_concat[i], LIMBWIDTH)
+    endfor
+    Point p = scalar_mult(B, s)
+
+
+    u32 FULL_MLEN = 64 + MSG_BYTES
+    u32 SHAROUNDS = sha_rounds::<MSG_BYTES>()
+    bool[512] hash = change_endianness::<512>(bignat_to_bits::<8,64>(new_bignat::<8>(sha512::<SHAROUNDS,FULL_MLEN>(m), 64)))
+
+    u32 P_ = 8
+    u32 LW_ = 32
+    u32 P2_ = ceildiv(512, LW_)
+    bool[Q_SIZE] reduced_hash = bignat_to_bits::<P_, LW_>(modulo_reduce::<P2_, P_, 8>(bits_to_bignat::<512,P2_, LW_>(hash), integer_to_bignat::<P_, LW_>(Q)))[..Q_SIZE]
+    
+    assert(verify_ed25519(r,a,s,reduced_hash))
+    return true

@@ -1,0 +1,14 @@
+import "../../../hash/sha256/sha256_padded" as sha256_padded
+
+// const u32[3] LIMBWIDTH = [11, 11, 10]
+const u32 LIMBWIDTH = 11
+// M: Message length
+// N: Number of invocations of sha256 blocks
+// NL: Number of limbs
+// input message is padded already
+// def test_sha256padded<N, NL>(field[8] expected_hash, field[N][16][NL] padded_message, u32 M, field[N][16][NL] PAD) -> bool:
+def test_sha256padded<N, NL>(field[8] expected_hash, field[N][16][NL] padded_message, u32 M) -> bool:
+    // field[8] actual_hash = sha256_padded::<N, NL>(padded_message, M, PAD, LIMBWIDTH)
+    field[8] actual_hash = sha256_padded::<N, NL>(padded_message, M, LIMBWIDTH)
+    assert(expected_hash == actual_hash)
+    return true

@@ -1,0 +1,105 @@
+// from "EMBED" import fits_in_bits
+// from "assert_well_formed" import fits_in_bits
+from "big_nat" import BigNat, BigNatb
+from "struct/adv_struct" import BigNat_init_quotient, BigNat_init
+
+import "utils/pack/bool/unpack_unchecked" as unpack_unchecked
+import "utils/pack/bool/pack" as pack
+import "utils/casts/u32_to_field" as u32_to_field
+
+// Check that x has N bits
+def fits_in_bits<N>(field x) -> bool:
+    unsafe witness bool[N] x_bool = unpack_unchecked::<N>(x)
+    return pack(x_bool) == x
+
+def BigNat_to_BigNatb<N, W>(BigNat<N> input) -> BigNatb<N, W>:
+    BigNatb<N, W> output =  BigNatb {limbs: [[false; W]; N]}
+    for u32 i in 0..N do
+        output.limbs[i] = unpack_unchecked(input.limbs[i]) // 0-bit is the most significant bit; the last bit is the most significant bit
+    endfor
+    return output
+// Use bit-splitting approach to check that the bitwidth of `input` is W
+def bit_splitting<W>(field input) -> bool:
+    bool[W] res = unpack_unchecked(input)
+    return input == pack(res)
+
+// list of field to field
+def adv_subrangecheck<L, W>(field[L] input)-> field:
+    field output = 0
+    field BASE = 1
+    field SHIFT = u32_to_field(1<<W)
+    for u32 i in 0..L do
+        assert(fits_in_bits::<W>(input[i]))
+        output = output + input[i] * BASE
+        BASE = BASE * SHIFT
+    endfor 
+    return output
+
+// usually used for carries
+def adv_rangecheck<N, L, W>(BigNat_init<N, L> input) -> BigNat<N>:
+    field BASE = 1
+    field SHIFT = u32_to_field(1<<W)
+    BigNat<N> output = BigNat {limbs: [0; N]}
+    for u32 i in 0..N do
+        BASE = 1
+        for u32 j in 0..L do
+            assert(fits_in_bits::<W>(input.limbs[i][j]))
+            output.limbs[i] = output.limbs[i] + input.limbs[i][j] * BASE
+            BASE = BASE * SHIFT
+        endfor // We will get output.limbs[i] = \sum_{j=0}^{j=L-1} input.limbs[i][j] * 2^{W*i}; BASE = 2^{W*L}
+    endfor
+    return output
+
+// w/o range check
+def combine_wocheck<N, L, W>(BigNat_init<N, L> input) -> BigNat<N>:
+    field BASE = 1
+    field SHIFT = u32_to_field(1<<W)
+    BigNat<N> output = BigNat {limbs: [0; N]}
+    for u32 i in 0..N do
+        BASE = 1
+        for u32 j in 0..L do
+            // assert(fits_in_bits::<W>(input.limbs[i][j]))
+            output.limbs[i] = output.limbs[i] + input.limbs[i][j] * BASE
+            BASE = BASE * SHIFT
+        endfor // We will get output.limbs[i] = \sum_{j=0}^{j=L-1} input.limbs[i][j] * 2^{W*i}; BASE = 2^{W*L}
+    endfor
+    return output
+
+// usually used for normal limbs with limbwidth = 32
+// Permutation approach to check most of the bits; Bit-splitting approach to check remaining bits
+def assert_well_formed<N, Lp1, W, W2>(BigNat_init<N, Lp1> input) -> BigNat<N>: 
+    BigNat<N> output = BigNat {limbs: [0; N]}
+
+    u32 L = Lp1 - 1
+
+    field BASE = 1
+    field SHIFT = u32_to_field(1<<W)
+
+    for u32 i in 0..N do
+        BASE = 1
+        for u32 j in 0..L do
+            assert(fits_in_bits::<W>(input.limbs[i][j]))
+            output.limbs[i] = output.limbs[i] + input.limbs[i][j] * BASE
+            BASE = BASE * SHIFT
+        endfor // We will get output.limbs[i] = \sum_{j=0}^{j=L-1} input.limbs[i][j] * 2^{W*i}; BASE = 2^{W*L}
+        assert(bit_splitting::<W2>(input.limbs[i][L]))
+        output.limbs[i] = output.limbs[i] + input.limbs[i][L] * BASE
+    endfor
+    return output
+
+// usually used for quotient
+def assert_well_formed_for_special_form<N, Nm1, Lp1, W, W2, W3>(BigNat_init_quotient<Nm1, Lp1> input) -> BigNat<N>: 
+    // assert(N == Nm1 + 1)
+    BigNat_init<Nm1, Lp1> first_part_init = BigNat_init {limbs: input.limbs}
+    BigNat<Nm1> first_part = assert_well_formed::<Nm1, Lp1, W, W2>(first_part_init)
+    BigNat<N> output = BigNat {limbs: [...first_part.limbs, input.last_limb]}
+    assert(bit_splitting::<W3>(input.last_limb))
+    return output
+
+// Limbwidth = W * Lp1
+def assert_well_formed_for_special_form_v2<N, Nm1, Lp1, W, W3>(BigNat_init_quotient<Nm1, Lp1> input) -> BigNat<N>: 
+    BigNat_init<Nm1, Lp1> first_part_init = BigNat_init {limbs: input.limbs}
+    BigNat<Nm1> first_part = adv_rangecheck::<Nm1, Lp1, W>(first_part_init)
+    BigNat<N> output = BigNat {limbs: [...first_part.limbs, input.last_limb]}
+    assert(bit_splitting::<W3>(input.last_limb))
+    return output

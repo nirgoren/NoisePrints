@@ -1,0 +1,85 @@
+from "../lut_q32.zok" import gaussian_lut
+import "hashes/poseidon/poseidon" as poseidon
+from "EMBED" import unpack, u32_from_bits, u32_to_bits, u64_from_bits, u64_to_bits, FIELD_MODULUS
+from "../utils.zok" import ceildiv
+import "../../sig-pop/third_party/ZoKrates/zokrates_stdlib/stdlib/utils/pack/bool/pack.zok" as pack
+
+def query_gaussian_lut_lookup(field x) -> field: // this function should be equivalent to return tbox0[x] but there is a bug
+    unsafe witness field tmp = gaussian_lut[x]
+    assert(tmp == gaussian_lut[x])
+    return tmp
+
+def bits_to_integer(field[255] bits) -> field[7][2]:
+    field[7][2] j_and_f = [[0;2];7]
+    field index = 0
+    for field i in 0..7 do
+        for u32 j in 0..15 do
+            j_and_f[i][0] = j_and_f[i][0]  + 2**j * bits[254-index]
+            index= index + 1
+        endfor
+        for u32 j in 0..16 do
+            j_and_f[i][1] = j_and_f[i][1]  + 2**j * bits[254-index]
+            index= index + 1
+        endfor
+            // extra skip based on python code
+            index= index + 1
+    endfor
+    return j_and_f
+
+def integer_to_bits(field val) -> field[255]:
+    bool[255] u8_bits = unpack::<255>(val)
+    field[255] bits = [0;255]
+
+    for u32 i in 0..255 do
+        bits[i] = if u8_bits[i] then 1 else 0 fi
+    endfor
+    return bits
+
+def u32_from_field(field f) -> u32:
+    bool[32] f_bits = unpack::<32>(f)
+    return u32_from_bits(f_bits)
+
+def u64_from_field(field f) -> u64:
+    bool[64] f_bits = unpack::<64>(f)
+    return u64_from_bits(f_bits)
+
+const field len_vec = 128
+
+const field a1 = 7
+
+def main(public field counter, private field seed1, public field[512] vec2_mag, public field[512] vec2_sign, public field commitment, private field randomness) -> bool:
+    field[512] product = [0;512]
+    field mag1_sq = 0
+    field[512] product_sign = [0;512] 
+    field dot_product = 0
+
+    field hash_val_1 = poseidon([seed1+counter])
+    for field i in 0..len_vec do
+        field[7] x0 = [0;7]
+        field[7] x1 = [0;7]
+        field[7] dx = [0;7] 
+        field[7] xQ = [0;7] 
+
+        hash_val_1 = a1 * hash_val_1
+        field[255] bits = integer_to_bits(hash_val_1)
+        field[7][2] j_and_f = bits_to_integer(bits)
+        field[7] sign = [bits[30],bits[29],bits[28],bits[27],bits[26],bits[25],bits[24]]
+        for field j in 0..7 do
+            x0[j] = query_gaussian_lut_lookup(j_and_f[j][0])
+            x1[j] = query_gaussian_lut_lookup(j_and_f[j][0]+1)
+            dx[j] = (x1[j] - x0[j])
+            xQ[j] = x0[j] + pack(u64_to_bits(u64_from_field(dx[j]*j_and_f[j][1]) >> 16))
+
+
+            product[i*4+j] = if j < 4 then xQ[j] * vec2_mag[i*4+j] else product[i*4+j] fi
+            product_sign[i*4+j] = if j < 4 then sign[j] + vec2_sign[i*4+j] - (2 * sign[j] *vec2_sign[i*4+j]) else product_sign[i*4+j] fi
+
+            dot_product = if j < 4 then (if product_sign[i*4+j] == 0 then dot_product+product[i*4+j] else dot_product-product[i*4+j] fi) else dot_product fi
+            mag1_sq = if j < 4 then mag1_sq + xQ[j]*xQ[j] else mag1_sq fi
+        endfor
+    endfor
+    
+    field ideal_commitment = poseidon([randomness, dot_product, mag1_sq])
+    assert(ideal_commitment == commitment)
+    return true
+

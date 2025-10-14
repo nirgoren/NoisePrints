@@ -1,0 +1,19 @@
+from "big_nat" import BigNat
+
+def is_equal_v2<N>(BigNat<N> x, BigNat<N> y) -> bool:
+    bool is_equal = true
+
+    for u32 i in 0..N do
+        is_equal = if (x.limbs[i] == y.limbs[i]) then is_equal else false fi
+    endfor
+
+    return is_equal
+
+def main<N>(private BigNat<N> x, private BigNat<N> y) -> bool:
+    bool is_equal = true
+
+    for u32 i in 0..N do
+        is_equal = if (x.limbs[i] == y.limbs[i]) then is_equal else false fi
+    endfor
+
+    return is_equal

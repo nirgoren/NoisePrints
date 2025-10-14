@@ -1,0 +1,113 @@
+// from "modulomultiply_w_diff_gpmaxword" import equal_when_carried_regroup3
+from "EMBED" import u32_to_field, u8_to_u32
+from "big_nat" import BigNatb, BigNatb_v2, BigNat, BigNatParams, BigNatModMult, GpBigNats, ModuloConst, ModuloHelperConst
+from "assert_well_formed" import BigNatb_to_BigNat, bool_to_field, BigNatb_to_BigNat_v2
+from "modulomultiply" import checkmultiply, group_limbs, addition
+import "utils/pack/bool/unpack" as unpack
+
+def equal_when_carried_regroup3<NG, GW, NGm1, CW, AC>(BigNat<NG> left, BigNat<NG> right, bool[CW] carry, field[NG] gp_maxword, field[AC] aux_const, u8[NGm1] CW_list) -> bool:
+    // return true
+    field target_base = 2 ** GW
+    field carry_in = 0
+    u32 start = 0
+    bool result = true
+    for u32 i in 0..NGm1 do
+       field carry_cur = carry_in
+       u32 end = start+u8_to_u32(CW_list[i])
+       carry_in = bool_to_field(carry[start..end])
+       start = end
+       result = if (left.limbs[i] + carry_cur + gp_maxword[i] - carry_in*target_base - right.limbs[i] == aux_const[i]) then result else false fi
+    //    result = result && (left.limbs[i] + carry_cur + gp_maxword[i] - carry_in*target_base - right.limbs[i] == aux_const[i])
+    endfor
+    // check last limb of carry equal last limb of aux_const
+    result = if (left.limbs[NGm1] + carry_in + gp_maxword[NGm1] - aux_const[NG]*target_base - right.limbs[NGm1] == aux_const[NGm1]) then result else false fi
+    // result = result && (left.limbs[NGm1] + carry_in + gp_maxword[NGm1] - aux_const[NG]*target_base - right.limbs[NGm1] == aux_const[NGm1])
+    return result
+
+// difference from group_limbs2: Allow `left` and `right` have different number of limbs
+def group_limbs3<NL, NR, NW, NG, LG>(BigNat<NL> left, BigNat<NR> right, field shift) -> GpBigNats<NG>: // assume left and right have the same limbwidth
+    // assert(limbs_per_group == 6)
+    field[NG] group_left = [0; NG]
+    field[NG] group_right = [0; NG]
+    field[LG] accumlated = [1; LG]
+    // u32 limb_width = NW * limbs_per_group // limbwidth for each group
+
+    // calculate [shift^0, shift^1, ..., shift^(limbs_per_group-1)]
+    for u32 j in 1..LG do
+        accumlated[j] = accumlated[j-1]*shift
+    endfor
+
+    // calculate the first NG - 1 limbs of group_left and group_right
+    u32 NGm1 = NG - 1 
+    for u32 i in 0..NGm1 do
+        u32 step = i*LG
+        for u32 j in 0..LG do
+            group_left[i] = group_left[i] + left.limbs[step] * accumlated[j]
+            group_right[i] = group_right[i] + right.limbs[step] * accumlated[j]
+            step = step + 1
+        endfor
+    endfor
+    u32 step = NGm1 * LG
+
+    u32 remain_limbs_per_gp_left = NL - step
+    for u32 j in 0..remain_limbs_per_gp_left do
+        group_left[NGm1] = group_left[NGm1] + left.limbs[step] * accumlated[j]
+        step = step + 1
+    endfor
+
+    step = NGm1 * LG
+    u32 remain_limbs_per_gp_right = NR - step
+    for u32 j in 0..remain_limbs_per_gp_right do
+        group_right[NGm1] = group_right[NGm1] + right.limbs[step] * accumlated[j]
+        step = step + 1
+    endfor
+
+    GpBigNats<NG> gpres = GpBigNats {left: BigNat {limbs: group_left}, right: BigNat {limbs: group_right}}
+    return gpres
+
+
+def simplemodularmultiply_v5<LG, W, A, B, NG, Z, ZG, P, Q, V, CW, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNat<Q> quotient, bool[CW] carry, field[NG] gp_maxword, field[AC] aux_const, u8[ZG] CW_list, field shift) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    assert(checkmultiply::<A, B, Z>(a, b, z)) // a*b = z
+    assert(checkmultiply::<Q, P, V>(quotient, modulus, v)) // quotient*modulus = v
+    BigNat<V> z_right = addition::<V, P>(v, remainder) // note V = Z + 1
+    assert(V == Z+1)
+    // assert(LG == 2)
+    // assert(NG == 4)
+    GpBigNats<NG> gpres = group_limbs3::<Z, V, W, NG, LG>(z, z_right, shift)
+    // assert(NG == 3)
+    u32 GW = LG * W
+    assert(equal_when_carried_regroup3::<NG, GW, ZG, CW, AC>(gpres.left, gpres.right, carry, gp_maxword, aux_const, CW_list))
+    return true
+
+// Difference from modularmultiply_wo_checking_output_v4_2: Allow the last limb of quotient to be smaller (W2 <= W)
+def modularmultiply_wo_checking_output_v5<LG, W, W2, A, B, NG, Z, ZG, P, Qm1, V, CW, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNatb_v2<Qm1, W, W2> quotientb, bool[CW] carry, field[NG] gp_maxword, field[AC] aux_const, u8[ZG] CW_list, field shift) -> bool: //assume we know the number of limbs at compile time
+    //check if the quotient is well-formed
+    //assume modulus is checked to be well formed in other places
+    u32 Q = Qm1 + 1
+    BigNat<Q> quotient = BigNatb_to_BigNat_v2::<Q, Qm1, W, W2>(quotientb)
+    return simplemodularmultiply_v5::<LG, W, A, B, NG, Z, ZG, P, Q, V, CW, AC>(a, b, z, modulus, remainder, v, quotient, carry, gp_maxword, aux_const, CW_list, shift)
+
+def modularmultiply_wo_checking_output<LG, W, W2, A, B, NG, Z, ZG, P, Qm1, V, CW, AC>(BigNat<A> a, BigNat<B> b, BigNat<Z> z, BigNat<P> modulus, BigNat<P> remainder, BigNat<V> v, BigNatb_v2<Qm1, W, W2> quotientb, bool[CW] carry, ModuloHelperConst<ZG, NG, AC> helper_const) -> bool: //assume we know the number of limbs at compile time
+    return modularmultiply_wo_checking_output_v5::<LG, W, W2, A, B, NG, Z, ZG, P, Qm1, V, CW, AC>(a, b, z, modulus, remainder, v, quotientb, carry, helper_const.moduloconst.gp_maxword, helper_const.moduloconst.aux_const, helper_const.moduloconst.CW_list, helper_const.shift)
+
+
+
+// allow remainder to have more limbs than modulus
+def modulo_v5_2<LG, W, W2, Z, NG, ZG, P, R, Qm1, V, CW, AC>(BigNat<Z> z, BigNat<P> modulus, BigNat<R> remainder, BigNat<V> v, BigNatb_v2<Qm1, W, W2> quotientb, bool[CW] carry, u8[ZG] CW_list, field[NG] gp_maxword, field[AC] aux_const, field shift) -> bool: //assume we know the number of limbs at compile time
+    //assume modulus and remainder is checked to be well formed in other places
+    u32 Q = Qm1 + 1
+    BigNat<Q> quotient = BigNatb_to_BigNat_v2::<Q, Qm1, W, W2>(quotientb)
+    assert(checkmultiply::<Q, P, V>(quotient, modulus, v)) // quotient*modulus = v
+    BigNat<V> z_right = addition::<V, R>(v, remainder)
+    // assert(V == Z+1)
+    GpBigNats<NG> gpres = group_limbs3::<Z, V, W, NG, LG>(z, z_right, shift)
+    // assert(NG == 3)
+    // assert(LG == 6)
+    u32 GW = LG * W
+    assert(equal_when_carried_regroup3::<NG, GW, ZG, CW, AC>(gpres.left, gpres.right, carry, gp_maxword, aux_const, CW_list))
+    return true
+
+def modulo<LG, W, W2, Z, NG, ZG, P, R, Qm1, V, CW, AC>(BigNat<Z> z, BigNat<P> modulus, BigNat<R> remainder, BigNat<V> v, BigNatb_v2<Qm1, W, W2> quotientb, bool[CW] carry, ModuloHelperConst<ZG, NG, AC> help_const) -> bool: //assume we know the number of limbs at compile time
+    return modulo_v5_2::<LG, W, W2, Z, NG, ZG, P, R, Qm1, V, CW, AC>(z, modulus, remainder, v, quotientb, carry, help_const.moduloconst.CW_list, help_const.moduloconst.gp_maxword, help_const.moduloconst.aux_const, help_const.shift)

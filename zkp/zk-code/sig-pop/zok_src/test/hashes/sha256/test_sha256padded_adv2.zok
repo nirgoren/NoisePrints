@@ -1,0 +1,10 @@
+from "test_sha256padded_adv" import test_sha256padded
+// from "../../../hash/sha256/padconst/pad" import PAD1
+const u32 N = 2
+const u32 NL = 3 // Number of limbs
+const u32 M = (N-1)*512 + 32 // Message length
+
+def main(field[8] expected_hash, private field[N][16][NL] padded_message) -> bool:
+    // assert(test_sha256padded::<N, NL>(expected_hash, padded_message, M, PAD1))
+    assert(test_sha256padded::<N, NL>(expected_hash, padded_message, M))
+    return true

@@ -1,0 +1,12 @@
+(set_default_modulus 52435875175126190479447740508185965837690552500527637822603658699938581184513
+(let (
+    (expected_hash.6 #f2725852225)
+    (expected_hash.1 #f1339594577)
+    (expected_hash.0 #f1328894177)
+    (expected_hash.5 #f2093322557)
+    (expected_hash.3 #f4272574115)
+    (expected_hash.4 #f4198948665)
+    (expected_hash.2 #f3952057521)
+    (expected_hash.7 #f3366840816)
+) false ; ignored
+))

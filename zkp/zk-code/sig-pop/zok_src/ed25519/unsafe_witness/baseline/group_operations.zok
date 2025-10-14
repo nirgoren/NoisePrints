@@ -1,0 +1,206 @@
+from "./struct" import Point, integers_to_point, point_to_integers, check_point, UncheckedPoint, BasePowers
+from "./basepowers.zok" import get_G_base_powers
+from "../../../zok_utils/unsafe_witness/big_nat/mod_arithmetic" import multiply, modulo_reduce, add, modulo_equal, modulo_equal_inner, integer_mod_divide, modulo_divide
+from "../../../zok_utils/unsafe_witness/util" import ceildiv, bool_to_field, maxi
+from "../../../zok_utils/unsafe_witness/big_nat/struct" import BigNat,BigNatParams,integer_to_bignat,bignat_to_integer,new_bignat, new_bignat_w_bitlen, check_bignat, UncheckedBigNat, integer_to_unchecked
+from "EMBED" import int_size, int_modinv, field_to_integer, integer_to_field
+import "utils/casts/u32_from_bits"
+import "utils/pack/bool/pack"
+
+
+const integer D = 37095705934669439343138083508754565189542113879843219016388785533085940283555
+const integer MODULUS = 2**255 - 19
+
+const integer Q = 2**252 + 27742317777372353535851937790883648493
+const u32 Q_SIZE = int_size(Q)
+
+const integer Gx = 15112221349535400772501151409588531511454012693041857206046113283949847762202
+const integer Gy = 46316835694926478169428394003475163141307993866256225615783033603165251855960
+
+def point_identity<P,LW>() -> Point<P>:
+    return integers_to_point::<P,LW>([0,1])
+    
+def generator<P,LW>() -> Point<P>:
+    return integers_to_point::<P,LW>([Gx, Gy])
+
+def point_add<P,WORDSIZE>(Point<P> p1, Point<P> p2) -> Point<P>:
+    u32 LW = p1.x.params.limbwidth
+    assert(LW * P >= int_size(MODULUS))
+    BigNat<P> MODULUS_NAT = integer_to_bignat::<P,LW>(MODULUS)
+    BigNat<P> D_NAT = integer_to_bignat::<P,LW>(D)
+
+    // P2 is the number of limbs a product of BigNat<P> BigNat<P> has
+    u32 P2 = 2*P - 1
+
+    BigNat<P2> x1y2 = multiply::<P,P,P2>(p1.x, p2.y)
+    BigNat<P2> x2y1 = multiply::<P,P,P2>(p2.x, p1.y)
+
+    BigNat<P> x1x2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(p1.x, p2.x), MODULUS_NAT)
+    BigNat<P> y1y2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(p1.y, p2.y), MODULUS_NAT)
+
+    BigNat<P> x1x2y1y2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(x1x2, y1y2), MODULUS_NAT)
+    BigNat<P> dx1x2y1y2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(x1x2y1y2, D_NAT), MODULUS_NAT)
+
+    BigNat<P> one = integer_to_bignat::<P,LW>(1)
+    // denom_x = 1 + denom_term
+    BigNat<P> denom_x = add::<P,P,P>(one, dx1x2y1y2)
+    // need to check x3 = numer_x / denom_x
+    BigNat<P2> numer_x = add::<P2,P2,P2>(x1y2, x2y1)
+    BigNat<P> x3 = modulo_divide::<P2,P,P,WORDSIZE>(numer_x, denom_x, MODULUS_NAT)
+
+
+    BigNat<P> numer_y = add::<P,P,P>(y1y2, x1x2)
+    unsafe witness UncheckedBigNat<P> y3_unchecked = integer_to_unchecked::<P>(integer_mod_divide(bignat_to_integer(numer_y), 1 - bignat_to_integer(dx1x2y1y2) + MODULUS, MODULUS), LW)
+    BigNat<P> y3 = check_bignat::<P,WORDSIZE>(y3_unchecked, LW)
+    assert(modulo_equal::<P2,P,P,WORDSIZE>(add::<P,P2,P2>(numer_y, multiply::<P,P,P2>(y3, dx1x2y1y2)),y3, MODULUS_NAT))
+
+    return Point {x: x3, y: y3 }
+
+
+def point_double<P,WORDSIZE>(Point<P> p) -> Point<P>:
+    return point_add::<P,WORDSIZE>(p,p)
+
+
+// meant as a standin for `if b then point_add(p1, p2) else default fi`, but ensures that params stay `const`
+// Obviously requires that point_add(p1,p2).params == default.params regardless of b for correctness
+def cond_point_add<P,WORDSIZE>(bool b, Point<P> p1, Point<P> p2, Point<P> default) -> Point<P>:
+    Point<P> add_result = point_add::<P,WORDSIZE>(p1, p2)
+    integer[P] x_max_limbs = [0; P]
+    integer[P] y_max_limbs = [0; P]
+    for u32 i in 0..P do
+        x_max_limbs[i] = maxi(add_result.x.params.max_limbs[i], default.x.params.max_limbs[i])
+        y_max_limbs[i] = maxi(add_result.y.params.max_limbs[i], default.y.params.max_limbs[i])
+    endfor
+    Point<P> result = if b then add_result else default fi
+    return Point {
+        x: BigNat {
+            limbs: result.x.limbs,
+            value: result.x.value,
+            params: BigNatParams {
+                max_limbs: x_max_limbs,
+                limbwidth: default.x.params.limbwidth,
+            }
+        },
+        y: BigNat {
+            limbs: result.y.limbs,
+            value: result.y.value,
+            params: BigNatParams {
+                max_limbs: y_max_limbs,
+                limbwidth: default.y.params.limbwidth
+            }
+        }
+    }
+            
+
+def scalar_mult<B,P,WORDSIZE>(bool[B] k, Point<P> pt) -> Point<P>:
+    u32 LW = pt.x.params.limbwidth
+    Point<P> addend = pt
+    Point<P> result = point_identity::<P,LW>()
+    for u32 i in 0..B do
+        result = cond_point_add::<P,WORDSIZE>(k[i], result, addend, result)
+        addend = point_double::<P,WORDSIZE>(addend)
+    endfor
+    return result
+
+def reverse_bits<N>(bool[N] arr) -> bool[N]:
+    bool[N] out = [false; N]
+    for u32 i in 0..N do
+        out[i] = arr[N-1-i]
+    endfor
+    return out
+
+def limbs_to_point<P,LW>(field[2][P] limbs) -> Point<P>:
+    return Point {
+        x: new_bignat_w_bitlen::<P>(limbs[0], LW, int_size(MODULUS)),
+        y: new_bignat_w_bitlen::<P>(limbs[1], LW, int_size(MODULUS))
+    }
+
+def scalar_mult_cached_window_inner<P,LW,STRIDE,WORDSIZE>(bool[P*LW] k, BasePowers<P,LW,STRIDE> base_powers) -> Point<P>:
+    u32 TB = P*LW
+    bool[TB] k_exp = reverse_bits::<TB>(k)
+    u32 N = ceildiv(TB, STRIDE)
+    field[N] k_chunks = [0; N]
+    u32 start = 0
+    for u32 i in 0..N-1 do
+        k_chunks[i] = pack(k_exp[start..start+STRIDE])
+        start = start + STRIDE
+    endfor
+    u32 LEFTOVER = if (TB) % STRIDE == 0 then STRIDE else (TB) % STRIDE fi
+    k_chunks[N-1] = pack(k_exp[start..start + LEFTOVER])
+    Point<P> result = limbs_to_point::<P,LW>(base_powers.base_powers[0][k_chunks[0]])
+
+    for u32 i in 1..N-1 do
+        Point<P> intermediate_point = limbs_to_point::<P,LW>(base_powers.base_powers[i][k_chunks[i]])
+        result = point_add::<P,WORDSIZE>(result, intermediate_point)
+    endfor
+    Point<P> intermediate_point = limbs_to_point::<P,LW>(base_powers.last_base_powers[k_chunks[N-1]])
+    result = point_add::<P,WORDSIZE>(result, intermediate_point)
+    return result
+
+def scalar_mult_cached_window<B,P,LW,STRIDE,WORDSIZE>(bool[B] k, BasePowers<P,LW,STRIDE> base_powers) -> Point<P>:
+    assert(B <= P * LW)
+    bool[P*LW] k_exp = [...k, ...[false; P*LW - B]]
+    return scalar_mult_cached_window_inner::<P,LW,STRIDE,WORDSIZE>(k_exp, base_powers)
+
+def scalar_multG<B,P,LW,STRIDE,WORDSIZE>(bool[B] k) -> Point<P>:
+    BasePowers<P,LW,STRIDE> base_powers = get_G_base_powers::<P,LW,STRIDE>()
+    return scalar_mult_cached_window::<B,P,LW,STRIDE,WORDSIZE>(k, base_powers)
+
+def is_on_curve<P,WORDSIZE>(Point<P> p) -> bool:
+    u32 LW = p.x.params.limbwidth
+    assert(LW * P >= int_size(MODULUS))
+    BigNat<P> MODULUS_NAT = integer_to_bignat::<P,LW>(MODULUS)
+    BigNat<P> D_NAT = integer_to_bignat::<P,LW>(D)
+
+    // P2 is the number of limbs a product of BigNat<P> BigNat<P> has
+    u32 P2 = 2*P - 1
+    BigNat<P> x2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(p.x, p.x), MODULUS_NAT)
+    BigNat<P> y2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(p.y, p.y), MODULUS_NAT)
+    BigNat<P> x2y2 = modulo_reduce::<P2,P,WORDSIZE>(multiply::<P,P,P2>(x2, y2), MODULUS_NAT)
+    BigNat<P2> x2y2d = multiply::<P,P,P2>(x2y2, D_NAT)
+    // y^2 - x^2 == x^2*y^2*d + 1
+    // x^2 * y^2 * d + 1 + x^2 = y^2
+    BigNat<P> one = integer_to_bignat::<P,LW>(1)
+    BigNat<P2> lhs = add::<P2,P,P2>(add::<P2,P2,P2>(x2y2d, integer_to_bignat::<P2,LW>(1)), x2)
+    assert(modulo_equal_inner::<P2,P,P,WORDSIZE>(lhs, y2, MODULUS_NAT))
+    return true
+
+
+const u32 WORDSIZE_ = 8
+const u32 P_ = 8
+const u32 LW_ = 32
+
+
+
+def main(private UncheckedPoint<P_> p1_u, private UncheckedPoint<P_> p2_u, UncheckedPoint<P_> expected) -> bool:
+    bool[Q_SIZE] s_const = [false; Q_SIZE]
+    s_const[1] = true
+    Point<P_> b = integers_to_point::<P_, LW_>([Gx, Gy])
+
+    print("{}", point_to_integers(point_add::<P_,WORDSIZE_>(b,b)))
+    //Point<P_> b2 = point_add::<P_,WORDSIZE_>(b,b)
+    //return point_to_integers(b2)
+    //Point<P_> p1 = Point {
+    //    x: new_bignat_w_bitlen::<P_>(p1_u.x.limbs, LW_, 255),
+    //    y: new_bignat_w_bitlen::<P_>(p1_u.y.limbs, LW_, 255)
+    //}
+    //Point<P_> p2 = Point {
+    //    x: new_bignat_w_bitlen::<P_>(p2_u.x.limbs, LW_, 255),
+    //    y: new_bignat_w_bitlen::<P_>(p2_u.y.limbs, LW_, 255)
+    //}
+
+    //Point<P_> actual = point_add::<P_,WORDSIZE_>(p1, p2)
+    //assert(expected.x.limbs == actual.x.limbs)
+    //assert(expected.y.limbs == actual.y.limbs)
+    Point<P_> b = integers_to_point::<P_,LW_>([Gx, Gy])
+    Point<P_> b2 = point_add::<P_,WORDSIZE_>(b,b)
+    print("{}", point_to_integers(b2))
+    //return point_to_integers(b2)
+
+    //Point<P_> p3 = point_add::<P_, WORDSIZE_>(p1, p2)
+    //assert(p3.x.limbs == expected.x.limbs)
+    //assert(p3.y.limbs == expected.y.limbs)
+    //return true
+    //assert(is_on_curve::<P,WORDSIZE>(p1))
+    //return true
+    return true

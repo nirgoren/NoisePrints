@@ -1,0 +1,24 @@
+const u32 NLIMBS = 64
+const u32 LIMBWIDTH = 32
+const u32 EXPBITS = 17
+// const u32 Ep3_ = EXPBITS + 3
+// const u32 W_ = LIMBWIDTH
+const u32 NG = 22 // number of limbs after group
+const u32 P = NLIMBS
+const u32 P2 = 256/LIMBWIDTH
+
+const u32 ZG = NG - 1
+const u32 Qm1 = NLIMBS
+const u32 Q_ = NLIMBS+1
+
+const u32 V = Q_ + P - 1 // NLIMBS * 2 
+const u32 Z = P*2 - 1 // NLIMBS * 2 - 1
+
+const u32 AC = NG + 1
+
+const u32 BITWIDTH = 10 // bitwidth for the sub-table
+const u32 W2 = LIMBWIDTH % BITWIDTH // W2 = 2
+const u32 W3 = 1
+const u32 CL = 4
+const u32 Lp1 = 4
+const u32 HASH_LIMBWIDTH = 11

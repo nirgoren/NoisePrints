@@ -1,0 +1,45 @@
+from "../../struct/ecdsastruct" import ECDSASignatureb, ECDSASignature
+from "../../../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMultwores_v5
+from "../../Fp-estimate/struct/ecdsaFp_struct" import ECPoint_Fp
+
+struct ECDSACertNaive_Fp_init<Q, W> {
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_Fp issuerkey
+    BigNatb<Q, W> digest_resultb
+}
+
+struct ECDSACertNaive_Fp_init_v2<Q, W> {
+    ECDSASignatureb<Q, W> signatureb
+    ECPoint_Fp issuerkey
+    BigNat<Q> digest_result
+}
+
+
+struct ECDSACertNaive_Fp<Q> {
+    ECDSASignature<Q> signature
+    ECPoint_Fp issuerkey
+    BigNat<Q> digest_result
+}
+
+struct PointAdd_x_Fp_init {
+    field m1
+    field m2
+    field carry_r // When x(ut) == r + q, set carry_r to show that r < p-q and check x(R) = r + q; Otherwise, we check x(ut) == r
+    // We use bit-splitting approach to check the bitwidth of carry_r (127 in the case of p256)
+}
+
+
+struct ECDSANaive_Fp_init<NQ, W, W2, Z, V, Qm1, CW> {
+    BigNat<NQ> e // we will check the bitwidth using bit-splitting method since we need its boolean representation for square and multiply method
+    BigNatModMultwores_v5<W, W2, Z, V, Qm1, CW> mm_for_e
+    ScalarMult<NQ, W>[2] mm_for_scalmul
+    field R_y
+    PointAdd_x_Fp_init partialadd
+}
+
+struct ScalarMult<NQ, W> {
+    field[NQ][W] mm_for_double // for point double
+}
+
+
+

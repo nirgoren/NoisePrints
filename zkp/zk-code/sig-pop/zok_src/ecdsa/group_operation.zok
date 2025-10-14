@@ -1,0 +1,387 @@
+from "../zok_utils/modulomultiply_v3" import modulo
+from "../zok_utils/modulomultiply" import addition, checkmultiply
+from "../zok_utils/big_nat" import BigNat, BigNatb, BigNatb_v2, ModuloConst, ModuloHelperConst, BigNatModMultwores_v5
+from "struct/ecdsastruct" import ECPoint_v2, ECPoint, PointDouble3, PointAdd3, PointAdd_plain, ScalarMult, BasePowers, ScalarMultWindow
+from "struct/ecdsaconststruct" import PointDoubleConst, PointAddConst, ScalarMultConst
+// import "utils/casts/u32_to_field"
+from "../zok_utils/assert_well_formed" import BigNatb_to_BigNat
+from "../zok_utils/scalar_mult" import scalar_multiply_bignat
+from "../zok_utils/is_equal" import is_equal_v2
+import "utils/casts/u32_from_bits"
+import "utils/pack/bool/pack" as pack
+
+// u32 AC = NG+1
+// u32 ZG = NG-1
+// ** fn arguments change **
+def point_double<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint_v2<P> pt, PointDouble3<W, W2, P, Z, V, Qm1, CW> intermediate, PointDoubleConst<P, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<P>: // assume pt1 is on the curve and is not the point at infinity
+    // Goal 1: check that m = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // 1. check 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    BigNat<P> m = BigNatb_to_BigNat::<P, W>(intermediate.remainders[0])
+    BigNat<P> double_y = scalar_multiply_bignat::<P, 2>(pt.y) // 2*y; the result might not be well-formed
+    assert(checkmultiply::<P, P, Z>(m, double_y, intermediate.products[0])) // m*(2*y)
+    u32 DOUBLE_P = 2*P // DOUBLE_P should equal V
+    BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[0]) // 12*p*p + 2*y*m
+
+    BigNat<P> three_x = scalar_multiply_bignat::<P, 3>(pt.x) 
+    assert(checkmultiply::<P, P, Z>(three_x, pt.x, intermediate.products[1]))
+    BigNat<Z> remainder_new1 = addition::<Z, P>(intermediate.products[1], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    assert(modulo::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[0], shift: helper_const.shift}))
+    // 2. x3 = (m * m - 2 * x) mod p <=> (m * m - 2 * x) = p * quotient + x3 <=> m * m + 4 * p = p * (quotient+4) + x3 + 2x // quotient bits 257
+    assert(checkmultiply::<P, P, Z>(m, m, intermediate.products[2])) // check if m * m == squ_m
+    BigNat<P> quadruple_p = scalar_multiply_bignat::<P, 4>(helper_const.P_MODULUS)
+    BigNat<Z> left3 = addition::<Z, P>(intermediate.products[2], quadruple_p) // Z >= P
+    BigNat<P> x3 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[1])
+    BigNat<P> double_x = scalar_multiply_bignat::<P, 2>(pt.x)
+    BigNat<P> x3_plus_doublex = addition::<P, P>(x3, double_x) // P >= P
+    // In this case, the number of bits required in quotient is 255, one bit smaller than that in P_MODULUS
+    assert(modulo::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(left3, helper_const.P_MODULUS, x3_plus_doublex, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[1], shift: helper_const.shift}))
+    // check y3 = p*quotient -y1 + m * (x1 - x3) <=> y3 + y1 + m*x3 + 4*p*p = p*(quotient+4*p) + m*x1
+    // method 2: check y3 = p*quotient -y1 + m * (x1 - x3) <=> y3 + y1 + m*x3 + 4*p*p = p*(quotient+4*p) + m*x1 (method 2 is better)
+    BigNat<P> y3 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[2])
+    BigNat<P> y1_plus_y3 = addition::<P, P>(y3, pt.y) // y3 + y
+    assert(checkmultiply::<P, P, Z>(m, x3, intermediate.products[3])) // m*x3
+    BigNat<Z> res_left3_0 = addition::<Z, P>(intermediate.products[3], y1_plus_y3) // m*x3 + y1 + y3
+    BigNat<DOUBLE_P> four_p_squ = scalar_multiply_bignat::<DOUBLE_P, 4>(helper_const.P_MODULUS_SQU) // 4*p*p
+    BigNat<DOUBLE_P> res_left3_1 = addition::<DOUBLE_P, Z>(four_p_squ, res_left3_0) // 4*p*p + m*x3 + y1 + y3
+
+    assert(checkmultiply::<P, P, Z>(m, pt.x, intermediate.products[4])) // m*x1 (remainder)
+    // In this case, the number of bits of quotient = 259 // check intermediate.products[6] % P_MODULUS = res_left3_1
+    assert(modulo::<LG, W, 3, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left3_1, helper_const.P_MODULUS, intermediate.products[4], intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[2], shift: helper_const.shift}))
+
+    return ECPoint_v2{x: x3, y: y3, empty: pt.empty}
+
+// not finish
+// assume pt1, pt2, output are non-empty
+// further assume pt1 != -pt2
+def check_point_add_inner<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint<P> pt1, ECPoint<P> pt2, ECPoint<P> output, PointAdd_plain<W, W2, P, Z, V, Qm1, CW> intermediate, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> bool:
+    // 1.1 compute m1 = (y1 - y2) * inverse_mod(x1 - x2, curve.p)  <=> m*(x1-x2)+y2 == p*quotient + y1 
+    // <=> m*(x1+2*p) + y2 == p*(quotient + 2*m) + y1 + m*x2
+    BigNat<P> two_p = scalar_multiply_bignat::<P, 2>(helper_const.P_MODULUS) // 2*p
+    BigNat<P> x1_plus_2p = addition::<P, P>(pt1.x, two_p) // x1+2*p
+    BigNat<P> m1 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[0])
+    assert(checkmultiply::<P, P, Z>(m1, x1_plus_2p, intermediate.products[0])) // m*(x1+2*p)
+    BigNat<Z> res_left = addition::<Z, P>(intermediate.products[0], pt2.y) // m*(x1+2*p) + y2
+
+    assert(checkmultiply::<P, P, Z>(m1, pt2.x, intermediate.products[1])) // m*x2
+    BigNat<Z> remainder_new = addition::<Z, P>(intermediate.products[1], pt1.y) // m*x2 + y1
+    // In this case, the number of bits of quotient = 258
+    // assert(modulo_v5_2::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, P256_CW2, P256_MAXWORD2, P256_AUXCONST2, shift))
+    assert(modulo::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[0], shift: helper_const.shift}))
+
+    // 1.2 compute m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // <=> 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    BigNat<P> m2 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[1])
+    BigNat<P> double_y = scalar_multiply_bignat::<P, 2>(pt1.y) // 2*y; the result might not be well-formed
+    assert(checkmultiply::<P, P, Z>(m2, double_y, intermediate.products[2])) // m*(2*y)
+    u32 DOUBLE_P = 2*P // DOUBLE_P should equal V
+    BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[2]) // 12*p*p + 2*y*m
+
+    BigNat<P> three_x1 = scalar_multiply_bignat::<P, 3>(pt1.x)
+    assert(checkmultiply::<P, P, Z>(three_x1, pt2.x, intermediate.products[3])) // check if (3*pt.x) * pt.x == squ_x
+    BigNat<Z> remainder_new1 = addition::<Z, P>(intermediate.products[3], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    assert(modulo::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[1], shift: helper_const.shift}))
+
+    bool point_equal = is_equal_v2(pt1.x, pt2.x) // actually I also need to check if y1 = y2
+    BigNat<P> m = if point_equal then m2 else m1 fi
+    // 2. compute x3 = m * m - x1 - x2 % p
+    // <=> m*m + 4*p == p*(quotient+4) + x3 + x1 + x2
+    assert(checkmultiply::<P, P, Z>(m, m, intermediate.products[4])) // m*m
+    BigNat<P> four_p = scalar_multiply_bignat::<P, 4>(helper_const.P_MODULUS) // 4*p
+    BigNat<Z> res_left2 = addition::<Z, P>(intermediate.products[4], four_p) // m*m + 4*p
+
+    BigNat<P> x1_plus_x2 = addition::<P, P>(pt1.x, pt2.x)
+    BigNat<P> x3 = output.x
+    BigNat<P> remainder_new2 = addition::<P, P>(x1_plus_x2, x3) // x1+x2+x3
+    // In this case, the number of bits of quotient = 257
+    assert(modulo::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(res_left2, helper_const.P_MODULUS, remainder_new2, intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[2], shift: helper_const.shift}))
+
+    // 3. compute y3 = -y1 + m * (x1 - x3) % p
+    // method 1: check -y1 + m * (x1 - x3) = p*quotient + y3 <=> 2*p + 4*p*p + m*x1 = p*quotient + y1 + m*x3 + y3
+    // method 2: check y3 = p*quotient -y1 + m * (x1 - x3) <=> y3 + y1 + m*x3 + 4*p*p = p*(quotient+4*p) + m*x1 (method 2 is better)
+    BigNat<P> y3 = output.y
+    BigNat<P> y1_plus_y3 = addition::<P, P>(pt1.y, y3)
+    assert(checkmultiply::<P, P, Z>(m, x3, intermediate.products[5])) // m*x3
+    BigNat<Z> res_left3_0 = addition::<Z, P>(intermediate.products[5], y1_plus_y3) // m*x3 + y1 + y3
+    BigNat<DOUBLE_P> four_p_squ = scalar_multiply_bignat::<DOUBLE_P, 4>(helper_const.P_MODULUS_SQU) // 4*p*p
+    BigNat<DOUBLE_P> res_left3_1 = addition::<DOUBLE_P, Z>(four_p_squ, res_left3_0) // 4*p*p + m*x3 + y1 + y3
+
+    assert(checkmultiply::<P, P, Z>(m, pt1.x, intermediate.products[6])) // m*x1 (remainder)
+    // In this case, the number of bits of quotient = 259 // check intermediate.products[6] % P_MODULUS = res_left3_1
+    return modulo::<LG, W, 3, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left3_1, helper_const.P_MODULUS, intermediate.products[6], intermediate.intermediate_mod[3].v, intermediate.intermediate_mod[3].quotientb, intermediate.intermediate_mod[3].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[3], shift: helper_const.shift})
+
+// assume pt1, pt2, output are non-empty
+// further assume pt1 != +-pt2
+def check_point_add_inner_incomplete<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint<P> pt1, ECPoint<P> pt2, ECPoint<P> output, PointAdd_plain<W, W2, P, Z, V, Qm1, CW> intermediate, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> bool:
+    // 1.1 compute m1 = (y1 - y2) * inverse_mod(x1 - x2, curve.p)  <=> m*(x1-x2)+y2 == p*quotient + y1 
+    // <=> m*(x1+2*p) + y2 == p*(quotient + 2*m) + y1 + m*x2
+    BigNat<P> two_p = scalar_multiply_bignat::<P, 2>(helper_const.P_MODULUS) // 2*p
+    BigNat<P> x1_plus_2p = addition::<P, P>(pt1.x, two_p) // x1+2*p
+    BigNat<P> m1 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[0])
+    assert(checkmultiply::<P, P, Z>(m1, x1_plus_2p, intermediate.products[0])) // m*(x1+2*p)
+    BigNat<Z> res_left = addition::<Z, P>(intermediate.products[0], pt2.y) // m*(x1+2*p) + y2
+
+    assert(checkmultiply::<P, P, Z>(m1, pt2.x, intermediate.products[1])) // m*x2
+    BigNat<Z> remainder_new = addition::<Z, P>(intermediate.products[1], pt1.y) // m*x2 + y1
+    // In this case, the number of bits of quotient = 258
+    // assert(modulo_v5_2::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, P256_CW2, P256_MAXWORD2, P256_AUXCONST2, shift))
+    assert(modulo::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[0], shift: helper_const.shift}))
+
+    // 1.2 compute m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // <=> 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    // BigNat<P> m2 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[1])
+    // BigNat<P> double_y = scalar_multiply_bignat::<P, 2>(pt1.y) // 2*y; the result might not be well-formed
+    // assert(checkmultiply::<P, P, Z>(m2, double_y, intermediate.products[2])) // m*(2*y)
+    u32 DOUBLE_P = 2*P // DOUBLE_P should equal V
+    // BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    // BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[2]) // 12*p*p + 2*y*m
+
+    // BigNat<P> three_x1 = scalar_multiply_bignat::<P, 3>(pt1.x)
+    // assert(checkmultiply::<P, P, Z>(three_x1, pt2.x, intermediate.products[3])) // check if (3*pt.x) * pt.x == squ_x
+    // BigNat<Z> remainder_new1 = addition::<Z, P>(intermediate.products[3], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    // assert(modulo::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[1], shift: helper_const.shift}))
+
+    // bool point_equal = is_equal_v2(pt1.x, pt2.x) // actually I also need to check if y1 = y2
+    // BigNat<P> m = if point_equal then m2 else m1 fi
+    BigNat<P> m = m1
+    // 2. compute x3 = m * m - x1 - x2 % p
+    // <=> m*m + 4*p == p*(quotient+4) + x3 + x1 + x2
+    assert(checkmultiply::<P, P, Z>(m, m, intermediate.products[4])) // m*m
+    BigNat<P> four_p = scalar_multiply_bignat::<P, 4>(helper_const.P_MODULUS) // 4*p
+    BigNat<Z> res_left2 = addition::<Z, P>(intermediate.products[4], four_p) // m*m + 4*p
+
+    BigNat<P> x1_plus_x2 = addition::<P, P>(pt1.x, pt2.x)
+    BigNat<P> x3 = output.x
+    BigNat<P> remainder_new2 = addition::<P, P>(x1_plus_x2, x3) // x1+x2+x3
+    // In this case, the number of bits of quotient = 257
+    assert(modulo::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(res_left2, helper_const.P_MODULUS, remainder_new2, intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[2], shift: helper_const.shift}))
+
+    // 3. compute y3 = -y1 + m * (x1 - x3) % p
+    // method 1: check -y1 + m * (x1 - x3) = p*quotient + y3 <=> 2*p + 4*p*p + m*x1 = p*quotient + y1 + m*x3 + y3
+    // method 2: check y3 = p*quotient -y1 + m * (x1 - x3) <=> y3 + y1 + m*x3 + 4*p*p = p*(quotient+4*p) + m*x1 (method 2 is better)
+    BigNat<P> y3 = output.y
+    BigNat<P> y1_plus_y3 = addition::<P, P>(pt1.y, y3)
+    assert(checkmultiply::<P, P, Z>(m, x3, intermediate.products[5])) // m*x3
+    BigNat<Z> res_left3_0 = addition::<Z, P>(intermediate.products[5], y1_plus_y3) // m*x3 + y1 + y3
+    BigNat<DOUBLE_P> four_p_squ = scalar_multiply_bignat::<DOUBLE_P, 4>(helper_const.P_MODULUS_SQU) // 4*p*p
+    BigNat<DOUBLE_P> res_left3_1 = addition::<DOUBLE_P, Z>(four_p_squ, res_left3_0) // 4*p*p + m*x3 + y1 + y3
+
+    assert(checkmultiply::<P, P, Z>(m, pt1.x, intermediate.products[6])) // m*x1 (remainder)
+    // In this case, the number of bits of quotient = 259 // check intermediate.products[6] % P_MODULUS = res_left3_1
+    return modulo::<LG, W, 3, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left3_1, helper_const.P_MODULUS, intermediate.products[6], intermediate.intermediate_mod[3].v, intermediate.intermediate_mod[3].quotientb, intermediate.intermediate_mod[3].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[3], shift: helper_const.shift})
+
+// P_MODULUS, P_MODULUS_SQU, P256_a
+// CW = 37+36
+// CW2 = 38+37
+// 1. compute m 
+// for different points m = (y1 - y2) * inverse_mod(x1 - x2, curve.p)
+// 2. compute x3 = m * m - x1 - x2 % p
+// 3. compute y3 = -y1 + m * (x1 - x3) % p
+// assume pt2 is not infinity point
+def point_add_inner<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint_v2<P> pt1, ECPoint_v2<P> pt2, PointAdd3<W, W2, P, Z, V, Qm1, CW> intermediate, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<P>:
+    // 1.1 compute m1 = (y1 - y2) * inverse_mod(x1 - x2, curve.p)  <=> m*(x1-x2)+y2 == p*quotient + y1 
+    // <=> m*(x1+2*p) + y2 == p*(quotient + 2*m) + y1 + m*x2
+    BigNat<P> two_p = scalar_multiply_bignat::<P, 2>(helper_const.P_MODULUS) // 2*p
+    BigNat<P> x1_plus_2p = addition::<P, P>(pt1.x, two_p) // x1+2*p
+    BigNat<P> m1 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[0])
+    assert(checkmultiply::<P, P, Z>(m1, x1_plus_2p, intermediate.products[0])) // m*(x1+2*p)
+    BigNat<Z> res_left = addition::<Z, P>(intermediate.products[0], pt2.y) // m*(x1+2*p) + y2
+
+    assert(checkmultiply::<P, P, Z>(m1, pt2.x, intermediate.products[1])) // m*x2
+    BigNat<Z> remainder_new = addition::<Z, P>(intermediate.products[1], pt1.y) // m*x2 + y1
+    // u32 AC = NG+1
+    // u32 ZG = NG-1
+    // In this case, the number of bits of quotient = 258
+    // assert(modulo_v5_2::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, P256_CW2, P256_MAXWORD2, P256_AUXCONST2, shift))
+    assert(modulo::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[0], shift: helper_const.shift}))
+
+    // 1.2 compute m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // <=> 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    BigNat<P> m2 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[1])
+    BigNat<P> double_y = scalar_multiply_bignat::<P, 2>(pt1.y) // 2*y; the result might not be well-formed
+    assert(checkmultiply::<P, P, Z>(m2, double_y, intermediate.products[2])) // m*(2*y)
+    u32 DOUBLE_P = 2*P // DOUBLE_P should equal V
+    BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[2]) // 12*p*p + 2*y*m
+
+    BigNat<P> three_x1 = scalar_multiply_bignat::<P, 3>(pt1.x)
+    assert(checkmultiply::<P, P, Z>(three_x1, pt2.x, intermediate.products[3])) // check if (3*pt.x) * pt.x == squ_x
+    // BigNat<Z> three_squ_x = scalar_multiply_bignat::<Z, 3>(intermediate.products[3]) // set three_squ_x = 3*squ_x
+    BigNat<Z> remainder_new1 = addition::<Z, P>(intermediate.products[3], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    // assert(modulo_v5_2::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, P256_CW3,P256_MAXWORD3, P256_AUXCONST3, shift))
+    assert(modulo::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[1], shift: helper_const.shift}))
+
+    bool point_equal = is_equal_v2(pt1.x, pt2.x) // actually I also need to check if y1 = y2
+    BigNat<P> m = if point_equal then m2 else m1 fi
+    // BigNat<P> m = m1
+    // 2. compute x3 = m * m - x1 - x2 % p
+    // <=> m*m + 4*p == p*(quotient+4) + x3 + x1 + x2
+    assert(checkmultiply::<P, P, Z>(m, m, intermediate.products[4])) // m*m
+    BigNat<P> four_p = scalar_multiply_bignat::<P, 4>(helper_const.P_MODULUS) // 4*p
+    BigNat<Z> res_left2 = addition::<Z, P>(intermediate.products[4], four_p) // m*m + 4*p
+
+    BigNat<P> x1_plus_x2 = addition::<P, P>(pt1.x, pt2.x)
+    BigNat<P> x3 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[2])
+    BigNat<P> remainder_new2 = addition::<P, P>(x1_plus_x2, x3) // x1+x2+x3
+    // In this case, the number of bits of quotient = 257
+    // assert(modulo_v5_2::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(res_left2, P_MODULUS, remainder_new2, intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, P256_CW1, P256_MAXWORD4, P256_AUXCONST4, shift))
+    assert(modulo::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(res_left2, helper_const.P_MODULUS, remainder_new2, intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[2], shift: helper_const.shift}))
+
+    // 3. compute y3 = -y1 + m * (x1 - x3) % p
+    // method 1: check -y1 + m * (x1 - x3) = p*quotient + y3 <=> 2*p + 4*p*p + m*x1 = p*quotient + y1 + m*x3 + y3
+    // method 2: check y3 = p*quotient -y1 + m * (x1 - x3) <=> y3 + y1 + m*x3 + 4*p*p = p*(quotient+4*p) + m*x1 (method 2 is better)
+    BigNat<P> y3 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[3])
+    BigNat<P> y1_plus_y3 = addition::<P, P>(pt1.y, y3)
+    assert(checkmultiply::<P, P, Z>(m, x3, intermediate.products[5])) // m*x3
+    BigNat<Z> res_left3_0 = addition::<Z, P>(intermediate.products[5], y1_plus_y3) // m*x3 + y1 + y3
+    BigNat<DOUBLE_P> four_p_squ = scalar_multiply_bignat::<DOUBLE_P, 4>(helper_const.P_MODULUS_SQU) // 4*p*p
+    BigNat<DOUBLE_P> res_left3_1 = addition::<DOUBLE_P, Z>(four_p_squ, res_left3_0) // 4*p*p + m*x3 + y1 + y3
+
+    assert(checkmultiply::<P, P, Z>(m, pt1.x, intermediate.products[6])) // m*x1 (remainder)
+    // In this case, the number of bits of quotient = 259 // check intermediate.products[6] % P_MODULUS = res_left3_1
+    // assert(modulo_v5_2::<LG, W, 3, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left3_1, P_MODULUS, intermediate.products[6], intermediate.intermediate_mod[3].v, intermediate.intermediate_mod[3].quotientb, intermediate.intermediate_mod[3].carry, P256_CW4, P256_MAXWORD5, P256_AUXCONST5, shift))
+    assert(modulo::<LG, W, 3, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left3_1, helper_const.P_MODULUS, intermediate.products[6], intermediate.intermediate_mod[3].v, intermediate.intermediate_mod[3].quotientb, intermediate.intermediate_mod[3].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[3], shift: helper_const.shift}))
+    return ECPoint_v2{x: x3, y: y3, empty: false}
+
+
+def point_add<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint_v2<P> pt1, ECPoint_v2<P> pt2, PointAdd3<W, W2, P, Z, V, Qm1, CW> intermediate, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<P>:
+    return if pt1.empty then pt2 else point_add_inner::<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(pt1, pt2, intermediate, helper_const) fi
+
+// modify to adapt to window method; now, both pt1 and pt2 can be empty
+def point_add_window<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint_v2<P> pt1, ECPoint_v2<P> pt2, PointAdd3<W, W2, P, Z, V, Qm1, CW> intermediate, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<P>:
+    return if pt1.empty then pt2 else (if pt2.empty then pt1 else point_add_inner::<LG, NG, W, W2, P, Z, V, Qm1, CW, P_SQU, ZG, AC>(pt1, pt2, intermediate, helper_const) fi) fi
+
+// assume that we do not meet the identity point for now
+// 1. check if x1 == x2
+// 2. If x1==x2, compute the sum using point double; Else, compute the sum using point add (different)
+
+// iterate from the least significant bit of k
+def scalar_mult<LG, NG, W, W2, NP, NQ, Z, V, Qm1, CW, P_SQU, ZG, AC>(BigNatb<NQ, W> k, ECPoint_v2<NP> pt, ScalarMult<W, W2, NP, NQ, Z, V, Qm1, CW> intermediate, ScalarMultConst<NP, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<NP>: // assume pt is on curves
+    ECPoint_v2<NP> addend = pt
+    ECPoint_v2<NP> result = ECPoint_v2 {x: pt.x, y: pt.y, empty: true}
+    // bool initial = true
+
+    for u32 j in 0..NQ do
+        for u32 i in 0..W do
+            // In our use case, k cannot be zero. It is because a and b cannot be zero since sha256(m) and 
+            result = if k.limbs[j][W-i-1] then point_add::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, addend, intermediate.mm_for_pa[j][i], helper_const.const_for_pa) else result fi
+            addend = point_double::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(addend, intermediate.mm_for_pd[j][i], helper_const.const_for_pd)
+        endfor
+    endfor
+    return result
+
+// checking its correctness
+// S: number of elements in base powers
+def scalar_mult_w_window_method<LG, NG, W, W2, NP, NQ, Z, V, Qm1, CW, WS, PA, PD, P_SQU, ZG, AC, S, TOTAL>(bool[TOTAL] append_k, ECPoint_v2<NP> pt, ECPoint_v2<NP>[S] base_powers, ScalarMultWindow<W, W2, NP, PA, PD, Z, V, Qm1, CW> intermediate, ScalarMultConst<NP, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<NP>: // assume pt is on curve    u32 N_CHUNKS = PA + 1
+    u32 N_CHUNKS = PA + 1
+    u32 start = 0 // bit-0 is the most significant bit
+    u32[N_CHUNKS] k_chunks = [0; N_CHUNKS] // note: 52 = ceil(W*NP/WS)
+
+    for u32 i in 0..PA do
+        k_chunks[i] = u32_from_bits([...[false; 32-WS], ...append_k[start..start+WS]])
+        start = start + WS
+    endfor
+    u32 remain_WS = if (W*NP) % WS == 0 then WS else (W*NP) % WS fi
+    k_chunks[PA] = u32_from_bits([...[false; 32-remain_WS], ...append_k[start..start+remain_WS]])
+
+    // step 2: apply window method
+    ECPoint_v2<NP> result = base_powers[k_chunks[0]]
+
+    u32 idx_pd = 0
+    for u32 i in 1..PA do // 3, 4 ok
+        // compute (2^WS)*result
+        for u32 inner_i in idx_pd..(idx_pd+WS) do
+            result = point_double::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, intermediate.mm_for_pd[inner_i], helper_const.const_for_pd)
+        endfor
+        idx_pd = idx_pd+WS
+        result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers[k_chunks[i]], intermediate.mm_for_pa[i-1], helper_const.const_for_pa) // 0, ..., 49
+    endfor
+
+    for u32 inner_i in idx_pd..idx_pd+remain_WS do
+        result = point_double::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, intermediate.mm_for_pd[inner_i], helper_const.const_for_pd)
+    endfor
+    result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers[k_chunks[PA]], intermediate.mm_for_pa[PA-1], helper_const.const_for_pa)
+    return result
+
+// assume that we do not meet the identity point for now
+// 1. check if x1 == x2
+// 2. If x1==x2, compute the sum using point double; Else, compute the sum using point add (different)
+
+
+// split k into chunks of length 5 (the least significant chunk might have length < 5), iterate from the most significant bit of k
+// NG: Number of groups
+// WS: window size
+// PA: number of point additions (51 in this case)
+// append_k: the single vector of k
+def scalar_mult_w_cached_window_method<LG, NG, W, W2, NP, NQ, Z, V, Qm1, CW, WS, Nm1, S, LS, PA, P_SQU, ZG, AC, TOTAL>(bool[TOTAL] append_k, ECPoint_v2<NP> pt, BasePowers<NP, Nm1, S, LS> base_powers, PointAdd3<W, W2, NP, Z, V, Qm1, CW>[PA] intermediate, PointAddConst<NP, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<NP>: // assume pt is on curves
+    // step 1: Split append_k into chunks of length 5 (the least significant chunk might have length < 5)
+    u32 N_CHUNKS = PA + 1
+    u32 start = 0 // bit-0 is the most significant bit
+    u32[N_CHUNKS] k_chunks = [0; N_CHUNKS] // note: 52 = ceil(W*NP/WS)
+
+    for u32 i in 0..PA do
+        k_chunks[i] = u32_from_bits([...[false; 32-WS], ...append_k[start..start+WS]])
+        start = start + WS
+    endfor
+    u32 remain_WS = if (W*NP) % WS == 0 then WS else (W*NP) % WS fi
+
+    k_chunks[PA] = u32_from_bits([...[false; 32-remain_WS], ...append_k[start..start+remain_WS]])
+
+    // step 2: apply window method
+    ECPoint_v2<NP> result = base_powers.base_powers[0][k_chunks[0]] // should equal k_chunks[0]*2^(256-WS)
+
+    u32 idx_pd = 0
+    for u32 i in 1..PA do // 3, 4 ok
+        result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers.base_powers[i][k_chunks[i]], intermediate[i-1], helper_const) // 0, ..., 49
+    endfor
+
+    result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers.last_base_powers[k_chunks[PA]], intermediate[PA-1], helper_const)
+    return result
+
+def convert_bool_scalar_to_chunks<WS, TOTAL, N_CHUNKS>(bool[TOTAL] append_k) -> field[N_CHUNKS]:
+    u32 PA = N_CHUNKS - 1
+    u32 start = 0 // bit-0 is the most significant bit
+    field[N_CHUNKS] k_chunks = [0; N_CHUNKS] // note: 52 = ceil(W*NP/WS)
+
+    for u32 i in 0..PA do
+        // k_chunks[i] = u32_from_bits([...[false; 32-WS], ...append_k[start..start+WS]])
+        k_chunks[i] = pack(append_k[start..start+WS])
+        start = start + WS
+    endfor
+    u32 remain_WS = if TOTAL % WS == 0 then WS else TOTAL % WS fi
+
+    // k_chunks[PA] = u32_from_bits([...[false; 32-remain_WS], ...append_k[start..start+remain_WS]])
+    k_chunks[PA] = pack(append_k[start..start+remain_WS])
+    return k_chunks
+
+// the difference from the function `scalar_mult_w_cached_window_method` is that this function takes as input field[N_CHUNKS] k_chunks
+def scalar_mult_w_cached_window_method_w_scalar_chunks<LG, NG, W, W2, NP, Z, V, Qm1, CW, Nm1, S, LS, PA, P_SQU, ZG, AC, N_CHUNKS>(field[N_CHUNKS] k_chunks, BasePowers<NP, Nm1, S, LS> base_powers, PointAdd3<W, W2, NP, Z, V, Qm1, CW>[PA] intermediate, PointAddConst<NP, P_SQU, ZG, NG, AC> helper_const) -> ECPoint_v2<NP>: // assume pt is on curves
+    // step 1: Split append_k into chunks of length 5 (the least significant chunk might have length < 5)
+    // u32 N_CHUNKS = PA + 1
+    // u32 start = 0 // bit-0 is the most significant bit
+    // u32[N_CHUNKS] k_chunks = [0; N_CHUNKS] // note: 52 = ceil(W*NP/WS)
+
+    // for u32 i in 0..PA do
+    //     k_chunks[i] = u32_from_bits([...[false; 32-WS], ...append_k[start..start+WS]])
+    //     start = start + WS
+    // endfor
+    // u32 remain_WS = if (W*NP) % WS == 0 then WS else (W*NP) % WS fi
+
+    // k_chunks[PA] = u32_from_bits([...[false; 32-remain_WS], ...append_k[start..start+remain_WS]])
+
+    // step 2: apply window method
+    ECPoint_v2<NP> result = base_powers.base_powers[0][k_chunks[0]] // should equal k_chunks[0]*2^(256-WS)
+
+    u32 idx_pd = 0
+    // u32 PA = N_CHUNKS - 1
+    for u32 i in 1..PA do // 3, 4 ok
+        result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers.base_powers[i][k_chunks[i]], intermediate[i-1], helper_const) // 0, ..., 49
+    endfor
+
+    result = point_add_window::<LG, NG, W, W2, NP, Z, V, Qm1, CW, P_SQU, ZG, AC>(result, base_powers.last_base_powers[k_chunks[PA]], intermediate[PA-1], helper_const)
+    return result

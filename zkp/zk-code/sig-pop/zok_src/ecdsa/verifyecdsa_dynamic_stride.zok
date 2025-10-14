@@ -1,0 +1,195 @@
+from "struct/ecdsastruct" import ECPoint, ECDSACertificate, ECDSASignature, ECDSASignatureb, ScalarMult, PointAdd4, ECPoint_v2, ECDSACertificate_v2, ScalarMultWindow, BigNatECDSA_v5, BasePowers, BigNatECDSA_v6, ECDSACertificate_v2_hash_64, ECDSACertificate_v2_hash_32, ECDSACertificate_v2_hash_16, ECDSACertificate_proc
+from "group_operation" import scalar_mult_w_cached_window_method, scalar_mult, scalar_mult_w_window_method
+from "struct/ecdsaconststruct" import PointDoubleConst, PointAddConst, ScalarMultConst, VerifyECDSAConst, VerifyECDSAConstWindow
+from "../zok_utils/modulomultiply_v3" import modularmultiply_wo_checking_output, modulo
+from "../hash/convert" import u64vec_to_bignat, u32vec_to_bignat_in_order, u16vec_to_bignat
+
+from "../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMult, BigNatMod, BigNatModMultwores_v5, BigNatb_v2, ModuloConst, ModuloHelperConst, GpBigNats
+from "../zok_utils/scalar_mult" import scalar_multiply_bignat
+from "../zok_utils/assert_well_formed" import BigNatb_to_BigNat
+from "../zok_utils/modulomultiply" import addition, checkmultiply
+from "../zok_utils/is_equal" import is_equal_v2
+
+from "../zok_utils/modulomultiply" import group_limbs
+
+// check if x-coordinate of pt1+pt2 equals r in Fq // why there is no shift
+// In this function, assume number of limbs of modulus p equals number of limbs of modulus q
+def check_for_u_hat<LG, NG, W, W2, P, Q, Z, V, Qm1, CW, P_SQU, ZG, AC>(ECPoint_v2<P> pt1, ECPoint_v2<P> pt2, PointAdd4<W, W2, P, Z, V, Qm1, CW> intermediate, BigNat<P> r, BigNat<Q> q_modulus, PointAddConst<P, P_SQU, ZG, NG, AC> helper_const) -> bool: // need fix
+    // 1.1 compute m1 = (y1 - y2) * inverse_mod(x1 - x2, curve.p)  <=> m*(x1-x2)+y2 == p*quotient + y1 
+    // <=> m*(x1+2*p) + y2 == p*(quotient + 2*m) + y1 + m*x2
+    BigNat<P> two_p = scalar_multiply_bignat::<P, 2>(helper_const.P_MODULUS) // 2*p
+    BigNat<P> x1_plus_2p = addition::<P, P>(pt1.x, two_p) // x1+2*p
+    BigNat<P> m1 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[0])
+    assert(checkmultiply::<P, P, Z>(m1, x1_plus_2p, intermediate.products[0])) // m*(x1+2*p)
+    BigNat<Z> res_left = addition::<Z, P>(intermediate.products[0], pt2.y) // m*(x1+2*p) + y2
+
+    assert(checkmultiply::<P, P, Z>(m1, pt2.x, intermediate.products[1])) // m*x2
+    BigNat<Z> remainder_new = addition::<Z, P>(intermediate.products[1], pt1.y) // m*x2 + y1
+    // In this case, the number of bits of quotient = 258
+    // assert(modulo_v5_2::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, P256_CW2, P256_MAXWORD2, P256_AUXCONST2))
+    assert(modulo::<LG, W, 2, Z, NG, ZG, P, Z, Qm1, V, CW, AC>(res_left, helper_const.P_MODULUS, remainder_new, intermediate.intermediate_mod[0].v, intermediate.intermediate_mod[0].quotientb, intermediate.intermediate_mod[0].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[0], shift: helper_const.shift}))
+
+    // 1.2 compute m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p), where curve.a = -3
+    // <=> 2*y*m + 12*p*p = p*(quotient+12p) + 3*x*x + a // quotient bits = 260
+    BigNat<P> m2 = BigNatb_to_BigNat::<P, W>(intermediate.remainders[1])
+    BigNat<P> double_y = scalar_multiply_bignat::<P, 2>(pt1.y) // 2*y; the result might not be well-formed
+    assert(checkmultiply::<P, P, Z>(m2, double_y, intermediate.products[2])) // m*(2*y)
+    u32 DOUBLE_P = 2*P // DOUBLE_P should equal V
+    BigNat<DOUBLE_P> twelve_p_squ = scalar_multiply_bignat::<DOUBLE_P, 12>(helper_const.P_MODULUS_SQU) // 12*p*p
+    BigNat<DOUBLE_P> left1 = addition::<DOUBLE_P, Z>(twelve_p_squ, intermediate.products[2]) // 12*p*p + 2*y*m
+
+    BigNat<P> three_x1 = scalar_multiply_bignat::<P, 3>(pt1.x)
+    assert(checkmultiply::<P, P, Z>(three_x1, pt2.x, intermediate.products[3])) // check if (3*pt.x) * pt.x == squ_x
+    BigNat<Z> remainder_new1 = addition::<Z, P>(intermediate.products[3], helper_const.P256_a) // the number of limbs of P256_a <= that of three_squ_x
+    // In this case, the number of bits in quotient = 260 // Question: can the left-hand side has more limbs than the right-hand side
+    // assert(modulo_v5_2::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, P256_CW3,P256_MAXWORD3, P256_AUXCONST3))
+    assert(modulo::<LG, W, 4, DOUBLE_P, NG, ZG, P, Z, Qm1, V, CW, AC>(left1, helper_const.P_MODULUS, remainder_new1, intermediate.intermediate_mod[1].v, intermediate.intermediate_mod[1].quotientb, intermediate.intermediate_mod[1].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[1], shift: helper_const.shift}))
+
+    bool point_equal = is_equal_v2(pt1.x, pt2.x) // actually I also need to check if y1 = y2
+    BigNat<P> m = if point_equal then m2 else m1 fi
+    // 2. check that x3 = m * m - x1 - x2 % p and r = x3 % q
+    // <=> m*m + 4*p == p*(quotient+4) + q*(quotient') + r + x1 + x2 where quotient' = 0 or 1
+    assert(checkmultiply::<P, P, Z>(m, m, intermediate.products[4])) // m*m
+    BigNat<P> four_p = scalar_multiply_bignat::<P, 4>(helper_const.P_MODULUS) // 4*p
+    BigNat<Z> res_left2 = addition::<Z, P>(intermediate.products[4], four_p) // m*m + 4*p
+
+    BigNat<P> x1_plus_x2 = addition::<P, P>(pt1.x, pt2.x)
+    BigNat<P> x3 = if intermediate.quotient_r then addition::<P, P>(r, q_modulus) else r fi
+
+    BigNat<P> remainder_new2 = addition::<P, P>(x1_plus_x2, x3) // x1+x2+x3
+    // In this case, the number of bits of quotient = 257
+
+    return modulo::<LG, W, 1, Z, NG, ZG, P, P, Qm1, V, CW, AC>(res_left2, helper_const.P_MODULUS, remainder_new2, intermediate.intermediate_mod[2].v, intermediate.intermediate_mod[2].quotientb, intermediate.intermediate_mod[2].carry, ModuloHelperConst{moduloconst: helper_const.MODULO_CONST[2], shift: helper_const.shift})
+
+def verify_signature_in_format<NQ, W>(ECDSASignatureb<NQ, W> signatureb) -> ECDSASignature<NQ>:
+    // check that r and s are within limbwidth
+    BigNat<NQ> r = BigNatb_to_BigNat::<NQ, W>(signatureb.r)
+    BigNat<NQ> s = BigNatb_to_BigNat::<NQ, W>(signatureb.s)
+
+    // check that r!=0 and s!=0
+    // alternate method is to let the prover provide a differ bit and checks that r[differ]!=0, but it costs more constraints than the following method
+    bool check_r = false
+    bool check_s = false
+    for u32 i in 0..NQ do
+        check_r = check_r || (r.limbs[i] != 0)
+        check_s = check_s || (s.limbs[i] != 0)
+    endfor
+    assert(check_r && check_s)
+    return ECDSASignature {r: r, s: s}
+
+def signatureb_to_signature<NQ, W>(ECDSASignatureb<NQ, W> signatureb) -> ECDSASignature<NQ>:
+    // check that r and s are within limbwidth
+    BigNat<NQ> r = BigNatb_to_BigNat::<NQ, W>(signatureb.r)
+    BigNat<NQ> s = BigNatb_to_BigNat::<NQ, W>(signatureb.s)
+    return ECDSASignature {r: r, s: s}
+
+// def verify_signature_non_zero<NQ, W, NG>(ECDSASignature<NQ> signature) -> bool: // check that r!=0 and s!=0
+def verify_signature_non_zero<NQ>(ECDSASignature<NQ> signature) -> bool: // check that r!=0 and s!=0
+    bool check_r = false
+    bool check_s = false
+    for u32 i in 0..NQ do
+        check_r = check_r || (signature.r.limbs[i] != 0)
+        check_s = check_s || (signature.s.limbs[i] != 0)
+    endfor
+    return (check_r && check_s)
+    
+    // GpBigNats<NG> grouped_sign = group_limbs::<NQ, W, NG>(signature.r, signature.s)
+
+    // bool check_r = false
+    // bool check_s = false
+
+    // for u32 i in 0..NG do
+    //     check_r = check_r || (grouped_sign.left.limbs[i] != 0) // at least one limb in left is non-zero => left is non-zero
+    //     check_s = check_s || (grouped_sign.right.limbs[i] != 0)
+    // endfor
+
+    // return check_r && check_s
+
+def verify_group_op<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS, TOTAL>(ECDSACertificate_proc<NP, NQ> cert, BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> intermediate, bool[TOTAL] list_a, VerifyECDSAConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool:
+    // compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+    // and check that H(m)<q? 
+    BigNat<NQ> a = BigNatb_to_BigNat::<NQ, W>(intermediate.a)
+    // division: compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+    assert(modularmultiply_wo_checking_output::<LG, W, W2, NQ, NQ, NG, Z, ZG, NQ, Qm1, V, CW, AC>(a, cert.signature.s, intermediate.mm_for_a.z, helper_const.Q_MODULUS, cert.digest_result, intermediate.mm_for_a.v, intermediate.mm_for_a.quotientb, intermediate.mm_for_a.carry, helper_const.const_for_modq))
+    // comptue b = r/s mod q <=> check b*s == q*quotient + r
+    // and check that a<q?
+    BigNat<NQ> b = BigNatb_to_BigNat::<NQ, W>(intermediate.b)
+    assert(modularmultiply_wo_checking_output::<LG, W, W2, NQ, NQ, NG, Z, ZG, NQ, Qm1, V, CW, AC>(b, cert.signature.s, intermediate.mm_for_b.z, helper_const.Q_MODULUS, cert.signature.r, intermediate.mm_for_b.v, intermediate.mm_for_b.quotientb, intermediate.mm_for_b.carry, helper_const.const_for_modq))
+
+    ECPoint_v2<NP> pt_a = scalar_mult_w_cached_window_method::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, WS, Nm1, S, LS, PA, P_SQU, ZG, AC, TOTAL>(list_a, helper_const.P256_G, helper_const.Gpow, intermediate.scalarmul_a, helper_const.const_for_scalmul.const_for_pa)
+    ECPoint_v2<NP> pt_b = scalar_mult::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, P_SQU, ZG, AC>(intermediate.b, cert.issuerkey, intermediate.scalarmul_b, helper_const.const_for_scalmul) 
+    return check_for_u_hat::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, P_SQU, ZG, AC>(pt_a, pt_b, intermediate.mm_for_u_hat, cert.signature.r, helper_const.Q_MODULUS, helper_const.const_for_scalmul.const_for_pa) 
+
+def verify_group_op_window<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, PD, P_SQU, ZG, AC, S, TOTAL>(ECDSACertificate_proc<NP, NQ> cert, BigNatECDSA_v5<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA, PD> intermediate, bool[TOTAL] list_a, VerifyECDSAConstWindow<NP, NQ, P_SQU, ZG, NG, AC, S> helper_const) -> bool:
+    // compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+    // and check that H(m)<q? 
+    BigNat<NQ> a = BigNatb_to_BigNat::<NQ, W>(intermediate.a)
+    // division: compute a = H(m)/s mod q <=> check a*s == q*quotient + H(m)
+    assert(modularmultiply_wo_checking_output::<LG, W, W2, NQ, NQ, NG, Z, ZG, NQ, Qm1, V, CW, AC>(a, cert.signature.s, intermediate.mm_for_a.z, helper_const.Q_MODULUS, cert.digest_result, intermediate.mm_for_a.v, intermediate.mm_for_a.quotientb, intermediate.mm_for_a.carry, helper_const.const_for_modq))
+    // comptue b = r/s mod q <=> check b*s == q*quotient + r
+    // and check that a<q?
+    BigNat<NQ> b = BigNatb_to_BigNat::<NQ, W>(intermediate.b)
+    assert(modularmultiply_wo_checking_output::<LG, W, W2, NQ, NQ, NG, Z, ZG, NQ, Qm1, V, CW, AC>(b, cert.signature.s, intermediate.mm_for_b.z, helper_const.Q_MODULUS, cert.signature.r, intermediate.mm_for_b.v, intermediate.mm_for_b.quotientb, intermediate.mm_for_b.carry, helper_const.const_for_modq))
+
+    ECPoint_v2<NP> pt_a = scalar_mult_w_window_method::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, WS, PA, PD, P_SQU, ZG, AC, S, TOTAL>(list_a, helper_const.P256_G, helper_const.base_powers, intermediate.scalarmul_a, helper_const.const_for_scalmul)
+    ECPoint_v2<NP> pt_b = scalar_mult::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, P_SQU, ZG, AC>(intermediate.b, cert.issuerkey, intermediate.scalarmul_b, helper_const.const_for_scalmul) 
+    return check_for_u_hat::<LG, NG, W, W_PD, NP, NQ, Z, V, Qm1, CW2, P_SQU, ZG, AC>(pt_a, pt_b, intermediate.mm_for_u_hat, cert.signature.r, helper_const.Q_MODULUS, helper_const.const_for_scalmul.const_for_pa) 
+
+
+// Q: Number of limbs for a field element over Zq
+// P: Number of limbs for a field element over Zp
+
+// u32 AC = NG+1
+// u32 ZG = NG-1
+// Note: Nm1 does NOT equal N-1. Nm1 equals ceil(256 / stride)-1
+def verifyecdsa_64<LG, N, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS>(ECDSACertificate_v2_hash_64<NP, NQ, N, W> cert, BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> intermediate, VerifyECDSAConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool: // generic needs fix
+    ECDSASignature<NQ> signature = verify_signature_in_format(cert.signatureb)
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result_bignat = u64vec_to_bignat(cert.digest_result)
+    // digest_result [9995483654267043649, 1766159293505517316, 13275296677033047532, 1184920394268112084]
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result_bignat}
+    u32 TOTAL = NP*W
+    bool[TOTAL] list_a = [...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op::<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS, TOTAL>(cert_proc, intermediate, list_a, helper_const)
+
+def verifyecdsa_64_window<LG, N, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, PD, P_SQU, ZG, AC, S>(ECDSACertificate_v2_hash_64<NP, NQ, N, W> cert, BigNatECDSA_v5<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA, PD> intermediate, VerifyECDSAConstWindow<NP, NQ, P_SQU, ZG, NG, AC, S> helper_const) -> bool: // generic needs fix
+    ECDSASignature<NQ> signature = verify_signature_in_format(cert.signatureb)
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result_bignat = u64vec_to_bignat(cert.digest_result)
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result_bignat}
+    u32 TOTAL = NP*W
+    bool[TOTAL] list_a = [...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op_window::<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, PD, P_SQU, ZG, AC, S, TOTAL>(cert_proc, intermediate, list_a, helper_const)
+
+
+def verifyecdsa_32<LG, N, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS>(ECDSACertificate_v2_hash_32<NP, NQ, N, W> cert, BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> intermediate, VerifyECDSAConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool: // generic needs fix
+    ECDSASignature<NQ> signature = verify_signature_in_format(cert.signatureb)
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result_bignat = u32vec_to_bignat_in_order(cert.digest_result)
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result_bignat}
+    u32 TOTAL = NP*W
+    bool[TOTAL] list_a = [...intermediate.a.limbs[7], ...intermediate.a.limbs[6], ...intermediate.a.limbs[5], ...intermediate.a.limbs[4], ...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op::<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS, TOTAL>(cert_proc, intermediate, list_a, helper_const)
+
+def verifyecdsa_32_window<LG, N, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, PD, P_SQU, ZG, AC, S>(ECDSACertificate_v2_hash_32<NP, NQ, N, W> cert, BigNatECDSA_v5<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA, PD> intermediate, VerifyECDSAConstWindow<NP, NQ, P_SQU, ZG, NG, AC, S> helper_const) -> bool: // generic needs fix
+    ECDSASignature<NQ> signature = verify_signature_in_format(cert.signatureb)
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result_bignat = u32vec_to_bignat_in_order(cert.digest_result)
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result_bignat}
+    u32 TOTAL = NP*W
+    bool[TOTAL] list_a = [...intermediate.a.limbs[7], ...intermediate.a.limbs[6], ...intermediate.a.limbs[5], ...intermediate.a.limbs[4], ...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op_window::<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, PD, P_SQU, ZG, AC, S, TOTAL>(cert_proc, intermediate, list_a, helper_const)
+
+
+def verifyecdsa_16<LG, N, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS>(ECDSACertificate_v2_hash_16<NP, NQ, N, W> cert, BigNatECDSA_v6<W, W2, NP, NQ, Z, V, Qm1, CW, CW2, PA> intermediate, VerifyECDSAConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const) -> bool: // generic needs fix
+    ECDSASignature<NQ> signature = verify_signature_in_format(cert.signatureb)
+    // note: it is known that given a ECDSA signature on m, we can compute another ECDSA signature on m. Thus, it should be fine without checking r,s < q
+    BigNat<NQ> digest_result_bignat = u16vec_to_bignat(cert.digest_result)
+    ECDSACertificate_proc<NP, NQ> cert_proc = ECDSACertificate_proc{ signature: signature, issuerkey: cert.issuerkey, digest_result: digest_result_bignat}
+    u32 TOTAL = NP*W
+    bool[TOTAL] list_a = [...intermediate.a.limbs[15], ...intermediate.a.limbs[14], ...intermediate.a.limbs[13], ...intermediate.a.limbs[12], ...intermediate.a.limbs[11], ...intermediate.a.limbs[10], ...intermediate.a.limbs[9], ...intermediate.a.limbs[8], ...intermediate.a.limbs[7], ...intermediate.a.limbs[6], ...intermediate.a.limbs[5], ...intermediate.a.limbs[4], ...intermediate.a.limbs[3], ...intermediate.a.limbs[2], ...intermediate.a.limbs[1], ...intermediate.a.limbs[0]]
+    return verify_group_op::<LG, NG, W, W2, W_PD, NP, NQ, Z, V, Qm1, CW, CW2, WS, PA, P_SQU, ZG, AC, Nm1, S, LS, TOTAL>(cert_proc, intermediate, list_a, helper_const)
+
+def to_ecpoint2<P>(ECPoint<P> point, bool empty) -> ECPoint_v2<P>:
+    ECPoint_v2<P> res_point = ECPoint_v2{ x: point.x, y: point.y, empty: empty}
+    return res_point

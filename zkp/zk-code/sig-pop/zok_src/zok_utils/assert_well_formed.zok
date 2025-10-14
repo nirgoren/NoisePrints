@@ -1,0 +1,181 @@
+// #pragma curve bn128
+
+from "big_nat" import BigNatb, BigNatb_v2, BigNat, BigNatParams, GpBigNats
+import "utils/pack/bool/unpack" as unpack
+import "utils/pack/bool/unpack_unchecked"
+import "utils/pack/bool/pack" as pack
+// from "field" import FIELD_SIZE_IN_BITS
+from "EMBED" import bit_array_le, u32_to_u64, value_in_array, reverse_lookup //, fits_in_bits
+from "const/const_range_check" import D_1, D_2, D_3, D_4, D_5, D_6, D_7, D_8, D_9, D_10, D_11, D_12, D_13, D_14, D_15, D_TO_S_1, D_TO_S_2, D_TO_S_3, D_TO_S_4, D_TO_S_5, D_TO_S_6, D_TO_S_7, D_TO_S_8, D_TO_S_9, D_TO_S_10, D_TO_S_11, D_TO_S_12
+
+def d_to_s_table<N>() -> field[2f**N]:
+    assert(1 <= N && N <= 12)
+    return if (N == 1)  then D_TO_S_1  \
+      else if (N == 2)  then D_TO_S_2  \
+      else if (N == 3)  then D_TO_S_3  \
+      else if (N == 4)  then D_TO_S_4  \
+      else if (N == 5)  then D_TO_S_5  \
+      else if (N == 6)  then D_TO_S_6  \
+      else if (N == 7)  then D_TO_S_7  \
+      else if (N == 8)  then D_TO_S_8  \
+      else if (N == 9)  then D_TO_S_9  \
+      else if (N == 10) then D_TO_S_10 \
+      else if (N == 11) then D_TO_S_11 \
+      else                   D_TO_S_12 \
+      fi fi fi fi fi fi fi fi fi fi fi
+
+def d_table<N>() -> field[2f**N]:
+    assert(1 <= N && N <= 15)
+    return if (N == 1)   then D_1   \
+      else if (N == 2)   then D_2   \
+      else if (N == 3)   then D_3   \
+      else if (N == 4)   then D_4   \
+      else if (N == 5)   then D_5   \
+      else if (N == 6)   then D_6   \
+      else if (N == 7)   then D_7   \
+      else if (N == 8)   then D_8   \
+      else if (N == 9)   then D_9   \
+      else if (N == 10)  then D_10  \
+      else if (N == 11)  then D_11  \
+      else if (N == 12)  then D_12  \
+      else if (N == 13)  then D_13  \
+      else if (N == 14)  then D_14  \
+      else                    D_15  \
+      fi fi fi fi fi fi fi fi fi fi fi fi fi fi
+
+// Check that x has N bits
+def fits_in_bits<N>(field x) -> bool:
+    assert(value_in_array(x, d_table::<N>()))
+    return true
+
+// Check that x is a N-bit value in sparse form
+def fits_in_bits_sparse<N>(field x) -> bool:
+    assert(value_in_array(x, d_to_s_table::<N>()))
+    return true
+
+    
+// Convert x from sparse form to dense
+def sparse_to_dense<N>(field x) -> field:
+    return reverse_lookup(d_to_s_table::<N>(), x)
+
+// Convert x from dense form to sparse
+def dense_to_sparse<N>(field x) -> field:
+    return d_to_s_table::<N>()[x]
+          
+
+def sparse_ones<N>() -> field:
+    return dense_to_sparse::<N>(2**N - 1)
+
+
+def is_non_zero<NQ>(BigNat<NQ> input) -> bool:
+    bool non_zero = false
+    for u32 i in 0..NQ do
+        non_zero = non_zero || (input.limbs[i] != 0)
+    endfor
+    return non_zero
+    
+def group_bignat<N, W>(BigNat<N> left, BigNat<N> right) -> GpBigNats<2>: // assume we can pack N-1 limbs into one field element
+    u32 end = N-1
+    BigNat<2> gp_left = BigNat {limbs: [0, left.limbs[end]]}
+    BigNat<2> gp_right = BigNat {limbs: [0, right.limbs[end]]}
+    field base = 2 ** W
+    field shift = 1
+
+    for u32 i in 0..end do
+        gp_left.limbs[0] = gp_left.limbs[0] + left.limbs[i] * shift
+        gp_right.limbs[0] = gp_right.limbs[0] + right.limbs[i] * shift
+        shift = shift * base
+    endfor
+
+    GpBigNats<2> output = GpBigNats {left: gp_left, right: gp_right}
+    return output
+
+def is_equal<N, W>(BigNat<N> left, BigNat<N> right) -> bool: // assume we can pack N-1 limbs into one field element
+    field base = 2 ** W
+    GpBigNats<2> output = group_bignat::<N, W>(left, right)
+    return (output.left.limbs[0] == output.right.limbs[0] && output.left.limbs[1] == output.right.limbs[1])
+
+def bignat_to_field<N, W>(BigNat<N> input) -> field: // assume left and right have the same limbwidth
+    field output = 0
+    field base = 2 ** W
+    field shift = 1
+    for u32 i in 0..N do
+        output = output + input.limbs[i] * shift
+        shift = shift * base
+    endfor
+    return output
+
+def less_than_threshold_inner<P, P2>(BigNat<P> input, field input_value, field carry, field threshold) -> bool:
+    // The case input <= threshold is true if and only if the followings are true
+    // - If threshold_bignat[P2..P] is a trailing sequence of zeros in its limb representation, 
+    //      then input[P2..P] is a sequence of zeros
+    // - There exists carry such that
+    //    i) the bit-length of carry is at most the bit-length of threshold
+    //    ii) carry + input = threshold
+    bool notlessthan = false
+    for u32 i in P2..P do
+        notlessthan = notlessthan || (input.limbs[i] != 0) // set notlessthan to be true if one of the last several limbs of input is non-zero
+    endfor
+    notlessthan = notlessthan || (input_value + carry != threshold)
+    return !notlessthan
+
+
+// return true if input<=threshold; return false otherwise
+// assume that the prover is only incentivized to prove that the result is true; But the result is false does not allow him to trick on the final result
+// Assume P2 * W does not exceed the number of bits of field characteristics
+def less_than_threshold<P, P2, W>(BigNat<P> input, field carry, field threshold) -> bool: // assume P is even
+    assert(P2 == 4)
+    BigNat<P2> trunc_input = BigNat{ limbs: input.limbs[0..P2]}
+
+    field input_value = bignat_to_field::<P2, W>(trunc_input)
+
+    return less_than_threshold_inner::<P, P2>(input, input_value, carry, threshold)
+    // return !notlessthan
+
+def assert_well_formed<N, K>(BigNat<N> value) -> bool:
+    //u64 limb_width = value.bparams.limb_width
+    bool[K] res = [false; K]
+    for u32 i in 0..N do //ensure elements in 'limb_values' fit in 'limb_width' bits
+        res = unpack_unchecked(value.limbs[i]) //assume K < FIELD_SIZE_IN_BITS
+        //assert(if K >= FIELD_SIZE_IN_BITS then bit_array_le(res, [...[false; K - FIELD_SIZE_IN_BITS], ...unpack_unchecked::<FIELD_SIZE_IN_BITS>(-1)]) else true fi)
+    endfor
+    return true
+
+def bool_to_field<W>(bool[W] x) -> field:
+    return pack(x)
+
+def bignat_fit_in_bits<N, W>(BigNat<N> x) -> bool:
+    for u32 i in 0..N do
+        assert(fits_in_bits::<W>(x.limbs[i]))
+    endfor
+    return true
+
+def BigNatb_to_BigNat<N, W>(BigNatb<N, W> x) -> BigNat<N>:
+    BigNat<N> res = BigNat{limbs: [0; N]}
+    for u32 i in 0..N do
+        res.limbs[i] = pack(x.limbs[i])
+    endfor
+    return res
+
+def BigNatb_to_BigNat_v2<N, Nm1, W, W2>(BigNatb_v2<Nm1, W, W2> x) -> BigNat<N>: // Nm1 = N - 1 // difference from BigNatb_to_BigNat is that BigNatb_to_BigNat_v2 allows the last limb has a smaller bitwidth
+    // field[N] limbsres = [0; N]
+    BigNat<N> res = BigNat{limbs: [0; N]}
+    for u32 i in 0..Nm1 do
+        res.limbs[i] = pack(x.limbs[i])
+    endfor
+    res.limbs[Nm1] = pack::<W2>(x.limb)
+    // BigNat<N> res = BigNat{limbs: limbsres}
+    return res
+
+
+def check_limbwidth<W>(u32 limbwidth) -> bool:
+    //return u32_to_u64(W) == limbwidth
+    return W == limbwidth
+ 
+def main(BigNatb<10, 256> a, BigNat<10> b) -> bool:
+    //BigNatParams res = BigNatb_to_BigNat(a)
+    //BigNat<10> res = BigNatb_to_BigNat(a)
+    //bool res = check_limbwidth::<256>(a.bparams.limb_width)
+    return true
+    //return check_limbwidth<256>(a.bparams.limb_width)
+

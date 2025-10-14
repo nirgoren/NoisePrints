@@ -1,0 +1,46 @@
+from "../big_nat" import BigNatb, BigNatb_v2, BigNat//, BigNatParams, GpBigNats
+
+// Number of bignats
+def group_bignat<L, N, W>(BigNat<N>[L] input) -> field[L]:
+    field[L] output = [0; L]
+    field base = 2 ** W
+    field shift = 1
+
+    for u32 i in 0..N do
+        for u32 j in 0..L do
+            output[j] = output[j] + input[j].limbs[i] * shift
+        endfor
+        shift = shift * base        
+    endfor
+    return output
+
+// def group_one_bignat<N, W>(BigNat<N> input) -> field:
+//     field output = 0
+//     field base = 2 ** W
+//     field shift = 1
+
+//     for u32 i in 0..N do
+//         output = output + input.limbs[i] * shift
+//         shift = shift * base
+//     endfor
+//     return output
+
+// def group_two_bignats<N, W>(BigNat<N> left, BigNat<N> right) -> field[2]: // assume we can pack N limbs into one field element
+//     field[2] output = [0, 0]
+//     field base = 2 ** W
+//     field shift = 1
+
+//     for u32 i in 0..N do
+//         output[0] = output[0] + left.limbs[i] * shift
+//         output[1] = output[1] + right.limbs[i] * shift
+//         shift = shift * base
+//     endfor
+//     return output
+
+def is_bignat_equal_bignat<N, W>(BigNat<N> left, BigNat<N> right) -> bool: // assume we can pack N limbs into one field element
+    field[2] output = group_bignat::<2, N, W>([left, right])
+    return output[0] == output[1]
+
+def is_bignat_equal_field<N, W>(BigNat<N> left, field right) -> bool: // assume we can pack N limbs into one field element
+    field[1] left_field = group_bignat::<1, N, W>([left])
+    return left_field[0] == right

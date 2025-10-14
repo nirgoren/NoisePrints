@@ -1,0 +1,16 @@
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.pt
+*.pyc
+**/__pycache__/
+out/
+out_old/
+out_tmp/
+examples/
+figures/
+slurm/
+wandb/

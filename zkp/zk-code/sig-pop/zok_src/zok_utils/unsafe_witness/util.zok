@@ -1,0 +1,83 @@
+def u32_sum<N>(u32[N] a) -> u32:
+    u32 sum = 0
+    for u32 i in 0..N do
+        sum = sum + a[i]
+    endfor
+    return sum
+
+def ceildiv(u32 x, u32 y) -> u32:
+    return (x + y-1)/y
+
+def min(u32 a, u32 b) -> u32:
+    return if (a < b) then a else b fi
+
+def max(u32 a, u32 b) -> u32:
+    return if (a < b) then b else a fi
+
+def mini(integer a, integer b) -> integer:
+    return if (a < b) then a else b fi
+
+def maxi(integer a, integer b) -> integer:
+    return if (a < b) then b else a fi
+
+
+// very inefficient should only be done on const values
+def ceil_log2(u32 x) -> u32:
+    u32 log = 0
+    for u32 i in 0..32 do
+        log = if (x > (1 << i)) then log+1 else log fi
+    endfor
+    return log
+
+def zero_pad_u32<N,M>(u32[N] arr) -> u32[M]:
+    assert(M >= N)
+    u32[M] output = [0; M]
+    for u32 i in 0..N do
+        output[i] = arr[i]
+    endfor
+    return output
+
+def zero_pad_field<N,M>(field[N] arr) -> field[M]:
+    assert(M >= N)
+    field[M] output = [0; M]
+    for u32 i in 0..N do
+        output[i] = arr[i]
+    endfor
+    return output
+
+
+def zero_pad_integer<N,M>(integer[N] arr) -> integer[M]:
+    assert(M >= N)
+    integer[M] output = [0; M]
+    for u32 i in 0..N do
+        output[i] = arr[i]
+    endfor
+    return output
+
+
+def ceildivi(integer a, integer b) -> integer:
+    return (a + b - 1) / b
+
+
+def equalize_len<A,B,C>(integer[A] a, integer[B] b) -> integer[2][C]:
+    assert(C == max(A,B))
+    return [if (A > B) then a else zero_pad_integer::<A,B>(a) fi, if (A > B) then zero_pad_integer::<B,A>(b) else b fi]
+
+def equalize_lenf<A,B,C>(field[A] a, field[B] b) -> field[2][C]:
+    assert(C == max(A,B))
+    return [if (A > B) then a else zero_pad_field::<A,B>(a) fi, if (A > B) then zero_pad_field::<B,A>(b) else b fi]
+
+
+def bool_to_field(bool b) -> field:
+    return if b then 1 else 0 fi
+
+
+def zip_maxi<A,B,C>(integer[A] a, integer[B] b) -> integer[C]:
+    u32 MAB = max(A,B)
+    assert(MAB == C)
+    integer[2][MAB] eq = equalize_len::<A,B,MAB>(a,b)
+    integer[MAB] output = [0; MAB]
+    for u32 i in 0..MAB do
+        output[i] = maxi(eq[0][i], eq[1][i])
+    endfor
+    return output

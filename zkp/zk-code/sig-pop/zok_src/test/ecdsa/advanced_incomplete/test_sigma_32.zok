@@ -1,0 +1,34 @@
+from "../../../ecdsa/const/ecdsaconst_32" import CONST_FOR_ECDSA_INNER, Q_MODULUS, P_MINUSQ_MINUS1
+
+// from "../../../ecdsa/struct/ecdsastruct" import ECPoint, ECPoint_plain, ECDSACertificate, ECDSASignatureb, BigNatECDSA_v2, PointDouble2, PointAdd2, PointDouble3, BigNatECDSA_v3, PointAdd3, BigNatECDSA_v4, ScalarMult, PointAdd4, ECPoint_v2, ECDSACertificate_v2, ScalarMultWindow, BigNatECDSA_v5, BasePowers_plain, BigNatECDSA_v7, PointAdd_x, ECDSACertificate_v2_hash_32
+from "../../../ecdsa/struct/ecdsastruct" import ECPoint, ECPoint_v2, BasePowers_plain
+from "../../../zok_utils/big_nat" import BigNat, BigNatb, BigNatModMult, BigNatMod, BigNatModMultwores_v5, BigNatb_v2, ModuloConst, ModuloHelperConst
+from "../../../ecdsa/struct/ecdsaconststruct" import PointDoubleConst, PointAddConst, ScalarMultConst, VerifyECDSAConstPlain_ori, VerifyECDSAConstInner
+
+from "../../../ecdsa/verifyecdsa_dynamic_stride" import to_ecpoint2
+
+from "../../../ecdsa/sigma/verifyecdsa" import verifyecdsa
+
+from "../../../zok_utils/struct/adv_struct" import BigNat_init, ModuloConstAdv
+from "../../../ecdsa/struct/ecdsa_advstruct" import ECDSACertificate_init, ECDSASign_init, ECDSAIncomplete_init
+from "../../../ecdsa/struct/ecdsaconst_advstruct" import VerifyECDSAConstAdv, ScalarMultConstAdv, PointAddConstAdv, PointDoubleConstAdv, VerifyECDSASigmaConst
+from "../../../ecdsa/advanced/const/32" import CONST_FOR_PA, CONST_FOR_MODQ
+from "../../../ecdsa/struct/ecdsa_sigmastruct" import ECDSACertSigma_init, ECDSASigma_public, ECDSASigma_private
+
+def verifyecdsa_32<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(ECDSASigma_public<NP, NQ> pub, ECDSASign_init<NQ, Lp1> signature_init, BigNat_init<NP, Lp1> digest_result_init, ECDSASigma_private<NQ, NP, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> init, BasePowers_plain<NP, Nm1, S, LS> Gpow) -> bool:
+    ECDSACertSigma_init<NP, NQ, Lp1> cert = ECDSACertSigma_init {
+                                                pub: pub,
+                                                signature_init: signature_init,
+                                                digest_result_init: digest_result_init,
+                                            }
+    VerifyECDSASigmaConst<NP, NQ, P_SQU, ZG, NG, AC, Nm1, S, LS> helper_const = VerifyECDSASigmaConst {
+                                                                                    const_for_modq: CONST_FOR_MODQ, // we can use this as const_for_check_resp because i) each maxword here is no less than each maxword of const_for_check_resp; ii) their quotient_bw is the same
+                                                                                    // const_for_check_resp: CONST_FOR_CHECK_RESP,
+                                                                                    const_for_pa: CONST_FOR_PA, 
+                                                                                    Q_MODULUS: Q_MODULUS, 
+                                                                                    P_MINUSQ_MINUS1: P_MINUSQ_MINUS1,
+                                                                                    K_inv: CONST_FOR_ECDSA_INNER.P256_G, // need fix
+                                                                                    Kpow: Gpow // need fix
+                                                                                }                                 
+    assert(verifyecdsa::<W, BW, NQ, NP, NP2, Z, V, Qm1, Lp1, ZG, CL, CRL, NG, LG, AC, P_SQU, Nm1, S, LS, PA, WS>(cert, init, helper_const))
+    return true

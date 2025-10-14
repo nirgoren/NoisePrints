@@ -1,0 +1,36 @@
+from "EMBED" import value_in_array, reverse_lookup //, fits_in_bits
+from "./const/sparse_tables.zok" import D_TO_S_1, D_TO_S_2, D_TO_S_3, D_TO_S_4, D_TO_S_5, D_TO_S_6, D_TO_S_7, D_TO_S_8, D_TO_S_9, D_TO_S_10, D_TO_S_11, D_TO_S_12
+
+def d_to_s_table<N>() -> field[2f**N]:
+    assert(1 <= N && N <= 12)
+    return if (N == 1)  then D_TO_S_1  \
+      else if (N == 2)  then D_TO_S_2  \
+      else if (N == 3)  then D_TO_S_3  \
+      else if (N == 4)  then D_TO_S_4  \
+      else if (N == 5)  then D_TO_S_5  \
+      else if (N == 6)  then D_TO_S_6  \
+      else if (N == 7)  then D_TO_S_7  \
+      else if (N == 8)  then D_TO_S_8  \
+      else if (N == 9)  then D_TO_S_9  \
+      else if (N == 10) then D_TO_S_10 \
+      else if (N == 11) then D_TO_S_11 \
+      else                   D_TO_S_12 \
+      fi fi fi fi fi fi fi fi fi fi fi
+
+// Check that x is a N-bit value in sparse form
+def fits_in_bits_sparse<N>(field x) -> bool:
+    assert(value_in_array(x, d_to_s_table::<N>()))
+    return true
+
+    
+// Convert x from sparse form to dense
+def sparse_to_dense<N>(field x) -> field:
+    return reverse_lookup(d_to_s_table::<N>(), x)
+
+// Convert x from dense form to sparse
+def dense_to_sparse<N>(field x) -> field:
+    return d_to_s_table::<N>()[x]
+          
+
+def sparse_ones<N>() -> field:
+    return dense_to_sparse::<N>(2**N - 1)

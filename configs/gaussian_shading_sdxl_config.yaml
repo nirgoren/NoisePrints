@@ -1,0 +1,81 @@
+# Gaussian Shading Watermarking Configuration - SDXL
+
+# General Configuration
+model_type: "sdxl"
+model_id: "stabilityai/stable-diffusion-xl-base-1.0"
+image_generation_count: 100
+output_dir: "out/gaussian_shading/SDXL/generated_images"
+latent_dir: "out/gaussian_shading/SDXL/generated_latents" 
+watermark_dir: "out/gaussian_shading/SDXL/watermarks"
+results_file: "out/gaussian_shading/SDXL/results.csv"
+
+# Image Generation Parameters
+image_width: 1024
+image_height: 1024
+num_inference_steps: 50
+guidance_scale: 7.5
+
+# Base Corruption Parameterization
+base_corruptions:
+  jpeg_corruption:
+    quality: [10, 15, 25]
+  gaussian_blur:
+    radius: [2, 4, 6]
+  gaussian_noise:
+    std: [0.1, 0.2, 0.3]
+  brightness_change:
+    factor: [2.0, 3.0, 4.0]
+  contrast_change:
+    factor: [2.0, 3.0, 4.0]
+  resize:
+    scale: [0.20, 0.25, 0.3]
+
+# Gaussian Shading Watermark Parameters
+gaussian_shading:
+  # Watermark structure parameters
+  ch_factor: 1        # Channel repetition factor
+  hw_factor: 8        # Height/Width downsampling factor
+  
+  # Detection parameters
+  fpr: 0.000001       # Target false positive rate (1e-6)
+  user_number: 1000000  # Number of potential users for multi-user scenario
+  
+  # Encryption method: "simple" (XOR) or "chacha" (ChaCha20)
+  encryption: "simple"  # Use simple XOR encryption by default
+  
+  # Detection thresholds (calculated automatically based on FPR)
+  # tau_onebit and tau_bits will be computed during initialization
+
+# Corruption Testing (reuse existing corruption functions)
+enable_corruptions: true
+corruptions:
+  - "jpeg_corruption"
+  - "gaussian_blur" 
+  - "gaussian_noise"
+  - "brightness_change"
+  - "resize"
+
+# SDEdit Attack Settings
+sdedit_corruptions:
+  enabled: true  # Set to true to enable SDEdit corruptions
+  noise_strengths: [0.3, 0.4, 0.5]  # List of noise strengths to test
+  attack_models: ["cross"]  # Types of attacks: same model or cross-model
+  cross_model_config: "configs/flux_config.yaml"  # Config for cross-model attacks
+
+# DDIM Inversion Parameters (for detection)
+inversion:
+  num_inference_steps: 50
+  guidance_scale: 1.0
+  empty_prompt: ""  # Use empty prompt for inversion as in reference
+
+# Inversion-Attack Corruption Settings (optional)
+inversion_corruptions:
+  enabled: true
+  attack_models: ["same"]
+  cross_model_config: "configs/sdxl_config.yaml"
+  similarity_weights: [0.3, 0.4, 0.5]
+  fidelity_weight: 1.0
+  inversion_steps: 50
+  inversion_guidance: 1.0
+  optimization_steps: 100
+  learning_rate: 0.01

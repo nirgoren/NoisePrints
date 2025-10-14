@@ -1,0 +1,49 @@
+# Seed Watermark Robustness Tests Configuration - SD2.0
+
+# General Configuration
+model_type: "sd2_0"  # "flux", "sdxl", "sd1_4", or "sd2_0"
+model_id: "stabilityai/stable-diffusion-2-base"
+image_generation_count: 100
+output_dir: "out/robustness_tests/SD2_0/generated_images"
+latent_dir: "out/robustness_tests/SD2_0/generated_latents"
+results_file: "out/robustness_tests/SD2_0/results.csv"
+
+# Image Generation Parameters
+image_width: 512
+image_height: 512
+num_inference_steps: 50
+guidance_scale: 7.5 
+
+# Base Corruption Parameterization
+base_corruptions:
+  jpeg_corruption:
+    quality: [10, 15, 25]
+  gaussian_blur:
+    radius: [2, 4, 6]
+  gaussian_noise:
+    std: [0.1, 0.2, 0.3]
+  brightness_change:
+    factor: [2.0, 3.0, 4.0]
+  contrast_change:
+    factor: [2.0, 3.0, 4.0]
+  resize:
+    scale: [0.20, 0.25, 0.3]
+
+# SDEdit Attack Settings
+sdedit_corruptions:
+  enabled: true
+  noise_strengths: [0.2, 0.4, 0.6]
+  attack_models: ["cross"]
+  cross_model_config: "configs/sdxl_config.yaml"
+
+# Inversion-Attack Corruption Settings (optional)
+inversion_corruptions:
+  enabled: true
+  attack_models: ["same", "cross"]
+  cross_model_config: "configs/sd1_4_config.yaml"
+  similarity_weights: [0.3, 0.4, 0.5]
+  fidelity_weight: 1.0
+  inversion_steps: 50
+  inversion_guidance: 1.0
+  optimization_steps: 100
+  learning_rate: 0.01

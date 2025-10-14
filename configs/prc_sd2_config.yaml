@@ -1,0 +1,95 @@
+# PRC Watermarking Configuration - SD2.0
+
+# General Configuration
+model_type: "sd2_0"
+model_id: "stabilityai/stable-diffusion-2-base"
+image_generation_count: 100
+output_dir: "out/prc_watermark/SD2_0/generated_images"
+latent_dir: "out/prc_watermark/SD2_0/generated_latents" 
+watermark_dir: "out/prc_watermark/SD2_0/watermarks"
+results_file: "out/prc_watermark/SD2_0/results.csv"
+
+# Image Generation Parameters
+image_width: 512
+image_height: 512
+num_inference_steps: 50
+guidance_scale: 7.5
+
+# Base Corruption Parameterization
+base_corruptions:
+  jpeg_corruption:
+    quality: [10, 15, 25]
+  gaussian_blur:
+    radius: [2, 4, 6]
+  gaussian_noise:
+    std: [0.1, 0.2, 0.3]
+  brightness_change:
+    factor: [2.0, 3.0, 4.0]
+  contrast_change:
+    factor: [2.0, 3.0, 4.0]
+  resize:
+    scale: [0.20, 0.25, 0.3]
+
+# PRC Watermark Parameters (True PRC)
+prc_watermark:
+  # Latent space dimensions
+  latent_h: 64        # Height of latent space (512/8)
+  latent_w: 64        # Width of latent space (512/8)
+  channels: 4         # Number of channels in SD latent space
+  
+  # Detection parameters
+  fpr: 1e-6           # Target detection FPR (adjust as needed)
+  design_fpr: 1e-6    # KeyGen FPR for test bits; set very small if desired (e.g., 1e-40)
+
+  # True PRC parameters
+  message_length: 512 # Payload size (bits)
+  t: 2                # Parity-check sparsity (2 often improves robustness)
+  g: null             # Random code dimension (defaults from secpar if null)
+  r: null             # Number of parity checks (computed if null)
+  noise_rate: null    # Channel noise rate (computed from secpar/g if null)
+
+  # Posterior mapping from inverted latents (reference-aligned)
+  posterior_mapping: erf
+  posterior_variance: 1.5
+  posterior_scale: 1.0  # used only if mapping=tanh
+  clamp_eps: 0.001      # clamp for numerical stability
+  
+  # Key management
+  key_seed: 42        # Seed for reproducible key generation
+  save_keys: true     # Save generated keys for detection
+
+# Corruption Testing
+enable_corruptions: true
+corruptions:
+  - "jpeg_corruption"
+  - "gaussian_blur" 
+  - "gaussian_noise"
+  - "brightness_change"
+  - "contrast_change"
+  - "resize"
+
+# SDEdit Attack Settings
+sdedit_corruptions:
+  enabled: true
+  noise_strengths: [0.2, 0.4, 0.6]
+  attack_models: ["cross"]
+  cross_model_config: "configs/sdxl_config.yaml"
+
+
+# Inversion-Attack Corruption Settings (optional)
+inversion_corruptions:
+  enabled: true
+  attack_models: ["same", "cross"]
+  cross_model_config: "configs/sd1_4_config.yaml"
+  similarity_weights: [0.3, 0.4, 0.5]
+  fidelity_weight: 1.0
+  inversion_steps: 50
+  inversion_guidance: 1.0
+  optimization_steps: 100
+  learning_rate: 0.01
+
+# DDIM Inversion Parameters (for detection)
+inversion:
+  num_inference_steps: 50
+  guidance_scale: 1.0
+  empty_prompt: ""

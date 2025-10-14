@@ -1,0 +1,19 @@
+
+
+def compute_base<N, W>() -> field[N]:
+    field[N] output = [0; N]
+    field base = 2**W
+    field shift = 1
+    for u32 i in 0..N do
+        output[i] = shift
+        shift = shift * base
+    endfor
+    return output
+
+def combine_limbs<N>(field[N] base, field[N] input) -> field:
+    field output = 0
+    for u32 i in 0..N do
+        output = output + input[i] * base[i]
+    endfor
+    return output
+

@@ -1,0 +1,28 @@
+import "sha256padding"
+
+// const u32 LEN = 4
+const u32 LEN = 56
+// const u32 LEN = 3368
+const u32 PADDED_LEN = (LEN * 8 + 64 + 1) / 512 + 1
+
+def main(private u8[LEN] input, private u32[PADDED_LEN][16] padded_input, u32 length) -> u32[PADDED_LEN][16]:
+    u32[length] trimed_input = [0;length]
+    u32[PADDED_LEN][16] padded_message = sha256padding::<LEN, PADDED_LEN>(input)
+    for u32 i in 0..15 do
+        assert(padded_message[0][i] == padded_input[0][i])
+    endfor
+    // assert(padded_message[0][0] == 0x01020304)
+    // // assert(padded_input[0][0] == )
+    // assert(padded_message[0][1] == 0x80000000)
+    // for u32 i in 2..15 do
+    //     assert(padded_message[0][i] == 0)
+    // endfor
+    return padded_message
+
+
+    // assert(padded_message[0][1] == 0x80000000)
+    // for u32 i in 2..15 do
+    //     assert(padded_message[0][i] == 0)
+    // endfor
+
+    // assert(padded_message[0][15] == 0x00000020)

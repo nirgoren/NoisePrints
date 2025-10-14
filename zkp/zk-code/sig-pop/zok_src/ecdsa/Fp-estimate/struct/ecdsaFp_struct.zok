@@ -1,0 +1,149 @@
+
+from "../../../zok_utils/big_nat" import BigNat //, BigNatb, BigNatMod, BigNatb_v2, BigNatModMultwores_v5
+from "../../../zok_utils/struct/adv_struct" import BigNat_init, BigNatModMultwores_init
+from "../../struct/ecdsa_advstruct" import ECDSASign_init
+from "../../struct/ecdsastruct" import ECDSASignature
+// from "ecdsastruct" import ECPoint, ECPoint_v2
+// from "ecdsaFp_conststruct" import PointAddConstFp
+
+struct ECDSASign_partinit<N, Lp1> { // N = number of limbs
+    BigNat_init<N, Lp1> r
+    BigNat<N> s
+}
+
+struct ECPoint_Fp {
+    field x
+    field y
+}
+
+struct ECPoint_v2_Fp {
+    field x
+    field y
+    bool empty
+}
+
+// to test
+// corresponding to ECDSASigma_public
+struct ECDSAFp_public<Q>{
+    field[2] hcommit
+    ECPoint_Fp partial_commit // partial commit for R
+    BigNat<Q>[4] responses // three responses in the sigma protocol; challenge = responses[3]
+}
+
+// corresponding to ECDSASigma_private
+struct ECDSAFp_private<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL, PA>{
+    field[2] openings
+    BigNat_init<NQ, Lp1>[6] exp_init // first three exponents are commited before the sigma protocol; last three exponents are randomly chosen in the commit phase of sigma protocol
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_1 = e_0 * u mod q, where z = e_0 * u, v = q*quotient; 2) check e_2 * r = h mod q, where z = e_2 * r, v = q*quotient
+    IncompletePointAdd_Fp[PA] scalarmul
+    PointAdd_x_Fp_init<CRL> partialadd
+}
+
+struct ECDSAFpSq_private<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL>{
+    field[2] openings
+    BigNat_init<NQ, Lp1>[6] exp_init // first three exponents are commited before the sigma protocol; last three exponents are randomly chosen in the commit phase of sigma protocol
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_1 = e_0 * u mod q, where z = e_0 * u, v = q*quotient; 2) check e_2 * r = h mod q, where z = e_2 * r, v = q*quotient
+    // IncompletePointAdd_Fp[PA] scalarmul
+    PointAdd_x_Fp_init<CRL> partialadd
+}
+
+struct ECDSACertFp_init<Q, Lp1> {
+    ECDSAFp_public<Q> pub
+    ECDSASign_init<Q, Lp1> signature_init
+    BigNat_init<Q, Lp1> digest_result_init
+}
+
+struct ECDSACertFpSq_init<Q, Lp1> {
+    ECDSAFp_public<Q> pub
+    ECDSASign_partinit<Q, Lp1> signature_init
+    BigNat_init<Q, Lp1> digest_result_init
+}
+
+struct ECDSACertFpNaive_init<Q, Lp1> {
+    ECDSASign_init<Q, Lp1> signature_init
+    ECPoint_Fp issuerkey
+    BigNat_init<Q, Lp1> digest_result_init
+}
+
+struct ECDSACertFpNaive_init_v2<Q, Lp1> {
+    ECDSASign_partinit<Q, Lp1> signature_init
+    ECPoint_Fp issuerkey
+    BigNat_init<Q, Lp1> digest_result_init
+}
+
+struct ECDSACertFpNaive<Q> {
+    ECDSASignature<Q> signature
+    ECPoint_Fp issuerkey
+    BigNat<Q> digest_result
+}
+
+struct ECDSACertFp<Q> {
+    ECDSASignature<Q> signature
+    ECPoint_v2_Fp issuerkey
+    BigNat<Q> digest_result
+}
+
+struct ECDSAFpNaive_init<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL> {
+    BigNat<NQ> a // we will check the bitwidth using bit-splitting method since we need its boolean representation for square and multiply method
+    BigNat<NQ> b // we will check the bitwidth using bit-splitting method since we need its boolean representation for square and multiply method
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> mm_for_a
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> mm_for_b
+    // BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_a // result = a = H(m)/s
+    // BigNatModMultadv<NQ, Z, V, Qm1, Lp1, ZG, CL> mm_for_b // result = b = r/s
+    PointAdd_x_Fp_init<CRL> partialadd
+}
+
+struct ECDSAFpNaive_init_v2<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL> {
+    BigNat<NQ> e // we will check the bitwidth using bit-splitting method since we need its boolean representation for square and multiply method
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL> mm_for_e // check e = h/r mod q
+    field R_y // y coordinate of R
+    PointAdd_x_Fp_init<CRL> partialadd
+}
+
+// 1. Check (x-x')m = y-y'; 2. Check m*m = x" + x + x'; 3. Check y" = m(x-x") - y
+struct IncompletePointAdd_Fp {
+    field m
+    field res_x
+    field res_y
+}
+
+// 1. Check (x-x')m1 = y-y'; 2. Check m2 = (3 * x1 * x1 + curve.a) * inverse_mod(2 * y1, curve.p) <=> 2*y*m2 + 12*p*p = p*(quotient+12p) + 3*x*x + a; 3. Check m*m = x" + x + x'
+struct PointAdd_x_Fp_init<CRL> {
+    field m1
+    field m2
+    field[CRL] carry_r // When x(ut) == r + q, set carry_r to show that r < p-q and check x(R) = r + q; Otherwise, we check x(ut) == r
+}
+
+struct PointAdd_x_Fp {
+    field m1
+    field m2
+    bool quotient_r // When x(ut) == r + q, quotient = true. Otherwise, quotient_r = false
+}
+
+// to test
+struct ECDSAFpSigma<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL, PA> {
+    BigNat<NQ>[4] responses // challenge and three responses in the sigma protocol
+    BigNat<NQ>[6] exponents
+    ECDSASignature<NQ> signature // r->r and v->s
+    BigNat<NQ> digest_result
+    ECPoint_v2_Fp partial_commit
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_2 = e_1 * u mod q, where z = e_1 * u, v = q*quotient; 2) check e_3 * r = h mod q, where z = e_3 * r, v = q*quotient
+    // IncompletePointAdd_init<NP, Z, V, Qm1, Lp1, ZG, CL>[PA] scalarmul // compute (K^{-1})^v
+    IncompletePointAdd_Fp[PA] scalarmul // compute (K^{-1})^v
+    PointAdd_x_Fp_init<CRL> partialadd
+}
+
+struct ECDSAFpSqSigma<NQ, Z, V, Qm1, Lp1, ZG, CL, CRL> {
+    BigNat<NQ>[4] responses // challenge and three responses in the sigma protocol
+    BigNat<NQ>[6] exponents
+    ECDSASignature<NQ> signature // r->r and v->s
+    BigNat<NQ> digest_result
+    ECPoint_v2_Fp partial_commit
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[3] prover_comp // for i in [3], check e'_i = e_i + gamma_i * c; z = gamma_i * c, v = q*quotient, res = e_i
+    BigNatModMultwores_init<Z, V, Qm1, Lp1, ZG, CL>[2] exp_represent // 1) check e_2 = e_1 * u mod q, where z = e_1 * u, v = q*quotient; 2) check e_3 * r = h mod q, where z = e_3 * r, v = q*quotient
+    // IncompletePointAdd_Fp[PA] scalarmul // compute (K^{-1})^v
+    PointAdd_x_Fp_init<CRL> partialadd
+}
